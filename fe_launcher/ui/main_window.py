@@ -17,8 +17,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QButtonGroup, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMenu,
-    QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
+    QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
     QVBoxLayout, QWidget,
 )
 
@@ -246,8 +246,9 @@ class Ue4ssSetupDialog(QDialog):
         root.addWidget(head)
 
         intro = QLabel(
-            "Cette opération installe UE4SS (l'extension qui permet au jeu de charger les "
-            "mods) et corrige le dossier au caractère grec qui empêche UE4SS de démarrer.")
+            "Le launcher télécharge UE4SS tout seul depuis GitHub (l'extension qui permet "
+            "au jeu de charger les mods), l'installe, et corrige le dossier au caractère "
+            "grec qui empêche UE4SS de démarrer. Vous n'avez rien à fournir.")
         intro.setObjectName("Dim")
         intro.setWordWrap(True)
         root.addWidget(intro)
@@ -263,12 +264,13 @@ class Ue4ssSetupDialog(QDialog):
 
         root.addWidget(separator())
 
-        # Choix du .zip d'UE4SS.
+        # Choix d'un .zip local, EN OPTION : le cas normal est le téléchargement auto.
+        # Utile hors ligne, ou pour imposer une version précise d'UE4SS.
         zip_row = QHBoxLayout()
-        self.zip_btn = QPushButton("Choisir le .zip d'UE4SS…")
+        self.zip_btn = QPushButton("Utiliser un .zip local (optionnel)…")
         self.zip_btn.clicked.connect(self._choose_zip)
         zip_row.addWidget(self.zip_btn, 0)
-        self.zip_label = QLabel("Aucune archive choisie (facultatif si UE4SS est déjà là).")
+        self.zip_label = QLabel("Par défaut, UE4SS est téléchargé automatiquement.")
         self.zip_label.setObjectName("Dim")
         self.zip_label.setWordWrap(True)
         zip_row.addWidget(self.zip_label, 1)
@@ -282,6 +284,13 @@ class Ue4ssSetupDialog(QDialog):
         self.zip_warning.setStyleSheet(f"color:{PALETTE.error};")
         self.zip_warning.hide()
         root.addWidget(self.zip_warning)
+
+        # Installer les mods dans la foulée : c'est le geste que l'utilisateur veut
+        # presque toujours (UE4SS ne sert à rien sans mods). Coché par défaut, mais
+        # décochable pour qui veut choisir ses mods à la main.
+        self.install_mods_box = QCheckBox("Installer aussi les mods fournis (recommandé)")
+        self.install_mods_box.setChecked(True)
+        root.addWidget(self.install_mods_box)
 
         # Zone de rapport, remplie après le lancement.
         self.report_holder = QWidget()
@@ -340,8 +349,21 @@ class Ue4ssSetupDialog(QDialog):
         report = ue4ss_setup.run(
             self.ctx.install, self.ctx.ledger,
             ue4ss_zip=self._zip, probe=doctor.steam_processes_running)
-        self._render_report(report)
+        # `discover()` reconstruit l'état : le renommage a changé le chemin de l'install.
         self.ctx.discover()
+
+        # Installer les mods APRÈS le discover : ils doivent aller dans l'install
+        # fraîchement re-détectée (au nouveau chemin ASCII), pas dans l'ancien dossier
+        # grec qui vient d'être renommé. On ne le fait que si UE4SS est bien en place.
+        if (self.install_mods_box.isChecked() and self.ctx.install is not None
+                and self.ctx.install.has_ue4ss):
+            from ..core import modinstall
+            mods_report = modinstall.install_all(
+                self.ctx.install.ue4ss, self.ctx.ledger)
+            report.add("Mods fournis", mods_report.ok, mods_report.message)
+            self.ctx.refresh()
+
+        self._render_report(report)
 
     def _render_report(self, report: SetupReport) -> None:
         while self.report_layout.count():

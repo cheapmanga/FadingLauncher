@@ -19,6 +19,9 @@ choisisse explicitement son fichier.
 
 from __future__ import annotations
 
+import json
+import urllib.error
+import urllib.request
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +34,77 @@ LEDGER_GROUP = "ue4ss-setup"
 
 # Fichiers/dossiers qui prouvent qu'une archive est bien UE4SS.
 _UE4SS_MARKERS = ("dwmapi.dll", "UE4SS-settings.ini")
+
+# Dépôt officiel d'UE4SS. On télécharge l'asset .zip de la dernière release plutôt que de
+# coder une URL en dur : les numéros de version changent, l'API des releases non.
+UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases/latest"
+
+
+@dataclass
+class DownloadResult:
+    ok: bool
+    path: Path | None
+    version: str = ""
+    message: str = ""
+
+
+def _pick_asset(assets: list[dict]) -> dict | None:
+    """Choisit le meilleur .zip d'une release UE4SS.
+
+    On préfère le build standard `UE4SS_v*.zip` : plus léger (~5 Mo) et suffisant pour
+    des mods Lua, qui sont les seuls qu'on embarque. Les variantes `z*` (zDEV, zCustom,
+    zMapGen) sont des extras — on ne les prend qu'à défaut de build standard.
+    """
+    zips = [a for a in assets if a.get("name", "").lower().endswith(".zip")]
+    if not zips:
+        return None
+    standard = [a for a in zips
+                if a["name"].lower().startswith("ue4ss_")
+                and not a["name"].lower().startswith("z")]
+    return (standard or zips)[0]
+
+
+def download_ue4ss(dest_dir: Path, *, timeout: int = 60) -> DownloadResult:
+    """Télécharge la dernière release d'UE4SS depuis GitHub, dans `dest_dir`.
+
+    L'utilisateur n'a plus rien à fournir : le launcher va chercher UE4SS tout seul.
+    Échoue proprement (sans lever) en cas d'absence de réseau ou d'API indisponible —
+    l'assistant propose alors de fournir un .zip à la main en repli.
+    """
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        req = urllib.request.Request(
+            UE4SS_RELEASES_API,
+            headers={"User-Agent": "fe-launcher",
+                     "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            release = json.load(r)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return DownloadResult(False, None,
+                              message=f"Téléchargement impossible (pas de réseau ?) : {exc}")
+
+    asset = _pick_asset(release.get("assets", []))
+    if asset is None:
+        return DownloadResult(False, None, release.get("tag_name", ""),
+                              "Aucune archive UE4SS dans la dernière release.")
+
+    out = dest_dir / asset["name"]
+    try:
+        req = urllib.request.Request(asset["browser_download_url"],
+                                     headers={"User-Agent": "fe-launcher"})
+        with urllib.request.urlopen(req, timeout=timeout) as r, out.open("wb") as f:
+            while chunk := r.read(1 << 16):
+                f.write(chunk)
+    except (urllib.error.URLError, OSError) as exc:
+        return DownloadResult(False, None, release.get("tag_name", ""),
+                              f"Échec du téléchargement de l'archive : {exc}")
+
+    if not looks_like_ue4ss_zip(out):
+        return DownloadResult(False, None, release.get("tag_name", ""),
+                              "L'archive téléchargée ne ressemble pas à UE4SS.")
+    return DownloadResult(True, out, release.get("tag_name", ""),
+                          f"UE4SS {release.get('tag_name', '')} téléchargé.")
 
 
 @dataclass
@@ -114,21 +188,36 @@ def install_ue4ss(install: GameInstall, zip_path: Path, ledger: Ledger,
 
 def run(install: GameInstall, ledger: Ledger, *,
         ue4ss_zip: Path | None = None,
+        download_dir: Path | None = None,
+        allow_download: bool = True,
         probe=doctor.steam_processes_running) -> SetupReport:
-    """Installe UE4SS (si un zip est fourni) puis corrige le chemin grec au besoin.
+    """Installe UE4SS puis corrige le chemin grec au besoin.
 
-    Retourne un rapport détaillé étape par étape : l'utilisateur voit ce qui a été fait
-    et ce qui a échoué, plutôt qu'un simple succès/échec.
+    UE4SS est TÉLÉCHARGÉ automatiquement depuis GitHub si aucune archive n'est fournie et
+    que le jeu n'en a pas encore — l'utilisateur n'a rien à donner. Un `ue4ss_zip` fourni
+    prend le pas sur le téléchargement (utile hors ligne ou pour une version précise).
+
+    Retourne un rapport détaillé étape par étape.
     """
     report = SetupReport(ok=True)
 
-    # 1. UE4SS, seulement si l'utilisateur a fourni une archive.
+    # 1. UE4SS : archive fournie, sinon téléchargement automatique.
+    if not install.has_ue4ss and ue4ss_zip is None and allow_download:
+        dest = download_dir or (Path(ledger.root) / "downloads")
+        dl = download_ue4ss(dest)
+        report.add("Téléchargement d'UE4SS", dl.ok, dl.message)
+        if dl.ok:
+            ue4ss_zip = dl.path
+        else:
+            report.ok = False
+
     if ue4ss_zip is not None:
         if not install_ue4ss(install, Path(ue4ss_zip), ledger, report):
             report.ok = False
     elif not install.has_ue4ss:
         report.add("UE4SS à installer", False,
-                   "aucune archive fournie. Indiquez le .zip d'UE4SS pour l'installer.")
+                   "aucune archive et téléchargement indisponible. Réessayez avec une "
+                   "connexion, ou fournissez le .zip d'UE4SS.")
 
     # 2. Correctif du chemin grec, uniquement s'il est nécessaire.
     if install.non_ascii_path:

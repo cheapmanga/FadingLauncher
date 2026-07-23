@@ -63,3 +63,30 @@ def test_refuse_si_steam_tourne(tmp_path):
     # le correctif de chemin échoue (mais UE4SS a pu s'installer avant le renommage)
     fix_step = next(s for s in rep.steps if "non-ASCII" in s.label)
     assert not fix_step.ok
+
+
+def test_pick_asset_prefere_le_build_standard():
+    assets = [{"name": "zDEV-UE4SS_v3.0.1.zip"}, {"name": "UE4SS_v3.0.1.zip"},
+              {"name": "zMapGenBP.zip"}]
+    assert ue4ss_setup._pick_asset(assets)["name"] == "UE4SS_v3.0.1.zip"
+
+
+def test_download_echoue_proprement_sans_reseau(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("pas de réseau")
+    monkeypatch.setattr(ue4ss_setup.urllib.request, "urlopen", boom)
+    r = ue4ss_setup.download_ue4ss(tmp_path)
+    assert not r.ok and r.path is None
+
+
+def test_run_telecharge_si_pas_de_zip(tmp_path, monkeypatch):
+    inst = _install_no_ue4ss(tmp_path)
+    (tmp_path / "dl").mkdir()
+    z = _fake_ue4ss_zip(tmp_path / "dl" / "UE4SS_vX.zip")
+    # simule un téléchargement réussi qui renvoie notre faux zip
+    monkeypatch.setattr(ue4ss_setup, "download_ue4ss",
+                        lambda dest, **k: ue4ss_setup.DownloadResult(True, z, "vX", "ok"))
+    led = Ledger(tmp_path / "led")
+    rep = ue4ss_setup.run(inst, led, probe=lambda: False)
+    assert any("Téléchargement" in s.label for s in rep.steps)
+    assert paths.inspect(tmp_path / "steamapps" / "common" / "Project Ygro").has_ue4ss

@@ -24,3 +24,7 @@ Thumbs.db
 /build/
 *.spec
 build_exe.log
+
+# UE4SS telecharge
+**/downloads/
+ue4ss_dl/

@@ -42,6 +42,7 @@ class AppContext(QObject):
     # --- découverte ---
 
     def discover(self) -> None:
+        self._migrate_renamed_roots()
         extra = [Path(p) for p in self.settings.extra_game_roots]
         self.installs = paths.discover(extra_roots=extra)
 
@@ -53,6 +54,32 @@ class AppContext(QObject):
         # les deux veut jouer au vrai jeu, pas à la démo. Ne rien préférer faisait
         # démarrer la démo au hasard de l'ordre de détection.
         self.select(chosen or self._default_install())
+
+    def _migrate_renamed_roots(self) -> None:
+        """Répare les chemins d'install manuels qu'un renommage a rendus périmés.
+
+        Le correctif du chemin grec renomme `Project Ygrό` en `Project Ygro`. Une racine
+        ajoutée à la main pointe alors sur un dossier disparu, et l'install n'est plus
+        trouvée. Pour chaque racine manquante, on cherche à côté un dossier de même nom
+        translittéré en ASCII : c'est très probablement le résultat du renommage.
+        """
+        from ..core.doctor import ascii_name
+        changed = False
+        migrated: list[str] = []
+        for raw in self.settings.extra_game_roots:
+            p = Path(raw)
+            if p.exists():
+                migrated.append(raw)
+                continue
+            ascii_candidate = p.with_name(ascii_name(p.name))
+            if ascii_candidate.name and ascii_candidate.exists():
+                migrated.append(str(ascii_candidate))
+                changed = True
+            else:
+                migrated.append(raw)  # on ne perd pas l'entrée, au cas où le dossier revienne
+        if changed:
+            self.settings.extra_game_roots = migrated
+            self.settings.save(self.data_dir)
 
     def _default_install(self) -> "GameInstall | None":
         if not self.installs:
