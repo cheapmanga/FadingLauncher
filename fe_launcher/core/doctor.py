@@ -45,6 +45,7 @@ if TYPE_CHECKING:  # évite un import circulaire à l'exécution
     from .ledger import Ledger
 from pathlib import Path
 
+from .procutil import run_hidden
 from .mods import Conflict, Mod, ModKind, ModState, conflicts, load, set_enabled
 from .paths import APPID, Edition, GameInstall
 
@@ -132,7 +133,7 @@ def steam_processes_running() -> bool | None:
     if sys.platform != "win32":
         return None
     try:
-        out = subprocess.run(
+        out = run_hidden(
             ["tasklist", "/FO", "CSV", "/NH"],
             capture_output=True, text=True, timeout=15, check=False,
         )

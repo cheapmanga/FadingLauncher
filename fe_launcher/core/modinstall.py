@@ -148,9 +148,20 @@ def install(layout: Ue4ssLayout, name: str, ledger: Ledger, *,
 
 
 def install_all(layout: Ue4ssLayout, ledger: Ledger, *,
-                names: list[str] | None = None, activate: bool = True) -> InstallReport:
-    """Installe plusieurs mods embarqués (tous par défaut). Rapport agrégé."""
-    targets = names if names is not None else [m.name for m in bundled_mods()]
+                names: list[str] | None = None, activate: bool = True,
+                include_restricted: bool = False) -> InstallReport:
+    """Installe plusieurs mods embarqués. Rapport agrégé.
+
+    Par défaut, EXCLUT les mods restreints (FEDevMenu) : le masquer dans l'interface ne
+    sert à rien si l'installation groupée le pose et l'active quand même sur le disque.
+    Il ne s'installe qu'avec `include_restricted=True` (mode développeur, choix explicite).
+    """
+    from . import moddocs  # import tardif : évite un cycle
+    if names is not None:
+        targets = names
+    else:
+        targets = [m.name for m in bundled_mods()
+                   if include_restricted or not moddocs.is_restricted(m.name)]
     report = InstallReport(ok=True)
     for name in targets:
         r = install(layout, name, ledger, activate=activate)

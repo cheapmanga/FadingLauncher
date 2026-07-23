@@ -1,11 +1,11 @@
-KismetDebuggerMod : 1
-EventViewerMod : 1
+KismetDebuggerMod : 0
+EventViewerMod : 0
 CheatManagerEnablerMod : 1
 ActorDumperMod : 0
-ConsoleCommandsMod : 1
+ConsoleCommandsMod : 0
 ConsoleEnablerMod : 1
 SplitScreenMod : 0
-LineTraceMod : 1
+LineTraceMod : 0
 BPML_GenericFunctions : 1
 BPModLoaderMod : 1
 jsbLuaProfilerMod : 0

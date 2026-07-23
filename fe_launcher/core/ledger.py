@@ -204,7 +204,11 @@ class Ledger:
             # vérification et l'écriture serait silencieusement remplacé (la délégation
             # à modify_file plus bas l'écraserait). O_EXCL ferme cette fenêtre de course.
             path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            # O_BINARY sur Windows : sans lui, un fd ouvert en mode texte traduirait
+            # `\n` en `\r\n` à l'écriture et corromprait un contenu binaire. Le drapeau
+            # n'existe pas sur POSIX, d'où le getattr.
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+            fd = os.open(path, flags)
             try:
                 os.write(fd, content)
             finally:

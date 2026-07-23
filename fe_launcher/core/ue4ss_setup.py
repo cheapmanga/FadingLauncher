@@ -77,21 +77,30 @@ def install_from_bundle(install: GameInstall, ledger: Ledger, report: SetupRepor
     # (orphelins) et pourraient entrer en conflit. Chaque suppression passe par le journal
     # (sauvegardée, donc annulable). Les mods sont ensuite regérés par la case dédiée.
     if replace:
-        removed = 0
-        for old in (win64 / "ue4ss", win64 / "dwmapi.dll"):
-            if old.is_dir():
-                for f in sorted(old.rglob("*"), reverse=True):
-                    if f.is_file():
-                        ledger.delete_file(f, label=f"ancien UE4SS : {f.name}",
-                                           group=LEDGER_GROUP)
-                        removed += 1
-            elif old.is_file():
-                ledger.delete_file(old, label=f"ancien UE4SS : {old.name}",
-                                   group=LEDGER_GROUP)
-                removed += 1
-        if removed:
-            report.add("Ancien UE4SS retiré", True,
-                       f"{removed} fichier(s) supprimé(s) avant réécriture propre.")
+        # Sous Windows, supprimer un fichier verrouillé (dwmapi.dll chargée par le jeu
+        # en cours, .ini tenu par un antivirus) lève PermissionError. Sans ce try, ça
+        # remonterait jusqu'au slot Qt et l'assistant CRASHERAIT au lieu d'afficher un
+        # rapport rouge. On rend l'échec propre, avec le conseil qui va bien.
+        try:
+            removed = 0
+            for old in (win64 / "ue4ss", win64 / "dwmapi.dll"):
+                if old.is_dir():
+                    for f in sorted(old.rglob("*"), reverse=True):
+                        if f.is_file():
+                            ledger.delete_file(f, label=f"ancien UE4SS : {f.name}",
+                                               group=LEDGER_GROUP)
+                            removed += 1
+                elif old.is_file():
+                    ledger.delete_file(old, label=f"ancien UE4SS : {old.name}",
+                                       group=LEDGER_GROUP)
+                    removed += 1
+            if removed:
+                report.add("Ancien UE4SS retiré", True,
+                           f"{removed} fichier(s) supprimé(s) avant réécriture propre.")
+        except OSError as exc:
+            report.add("Suppression de l'ancien UE4SS", False,
+                       f"{exc} — fermez complètement le jeu et Steam, puis réessayez.")
+            return False
 
     try:
         # 1. le proxy à la racine de Win64.
@@ -266,7 +275,10 @@ def install_ue4ss(install: GameInstall, zip_path: Path, ledger: Ledger,
                     continue
                 name = info.filename
                 # Le proxy reste à la racine de Win64 ; le reste descend dans ue4ss/.
-                if name.lower() == "dwmapi.dll":
+                # Path(name).name : le proxy peut être sous un dossier de tête dans
+                # certaines archives (`UE4SS/dwmapi.dll`). Comparer le nom complet le
+                # raterait et dwmapi finirait dans ue4ss/, UE4SS ne se chargerait jamais.
+                if Path(name).name.lower() == "dwmapi.dll":
                     target = win64 / "dwmapi.dll"
                 else:
                     target = ue4ss_dir / name

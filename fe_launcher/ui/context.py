@@ -137,7 +137,12 @@ class AppContext(QObject):
 
     @property
     def enabled_mods(self) -> list[mods_mod.Mod]:
-        return [m for m in self.mods if m.state is mods_mod.ModState.ENABLED]
+        # Compté parmi les mods VISIBLES, pas tous : sinon un mod restreint activé mais
+        # masqué (FEDevMenu hors mode développeur) donnerait « 17 actifs sur 16 »,
+        # incohérent avec la page Mods qui, elle, ne montre que les visibles.
+        visible = set(id(m) for m in self.visible_mods)
+        return [m for m in self.mods
+                if m.state is mods_mod.ModState.ENABLED and id(m) in visible]
 
     @property
     def conflicts(self) -> list[mods_mod.Conflict]:

@@ -35,7 +35,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from .paths import APPID, DEMO_SHIM, FULL_SHIM, UE_EXE, GameInstall, _steam_root
+from .procutil import run_hidden
+from .paths import (APPID, DEMO_SHIM, FULL_SHIM, UE_EXE, Edition, GameInstall,
+                    _steam_root)
 
 STEAM_URL = f"steam://rungameid/{APPID}"
 
@@ -177,6 +179,19 @@ def build_command(
             f"{' '.join(args)} — ils peuvent être ignorés, ou empêcher le démarrage."
         )
 
+    # La DÉMO est une autre app Steam, dont l'appid n'est pas 2467880. Lancer via
+    # `steam://rungameid/2467880` démarrerait le JEU COMPLET, pas la démo — et le launcher
+    # lirait ensuite le mauvais journal. Pour la démo, on lance donc le shim directement
+    # (son `steam_appid.txt` à côté de l'exe lui permet de se connecter à Steam). C'est le
+    # seul chemin possible sans connaître son appid.
+    if (mode is LaunchMode.STEAM and install is not None
+            and install.edition is Edition.DEMO and install.shim_exe is not None):
+        warnings.append(
+            "Démo : lancée directement (le launcher ne connaît pas son identifiant "
+            "Steam). Si elle ne démarre pas, lancez-la depuis Steam."
+        )
+        return [str(install.shim_exe)], install.shim_exe.parent, warnings
+
     if mode is LaunchMode.STEAM:
         status = steam_status()
         if not status.can_open_url:
@@ -253,11 +268,14 @@ def launch(
 
     # Détaché : fermer le launcher ne doit pas tuer le jeu. Les drapeaux n'existent
     # que sur Windows, d'où le getattr (le module tourne aussi sur le poste de dev).
+    # CREATE_NO_WINDOW en plus : le lancement Steam passe par `cmd /c start`, qui
+    # ferait clignoter une fenêtre de console sans ce drapeau. Le jeu, lui, crée sa
+    # propre fenêtre — le drapeau ne masque que la console intermédiaire.
     flags = 0
     if sys.platform == "win32":
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        )
+        flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                 | getattr(subprocess, "CREATE_NO_WINDOW", 0))
     try:
         proc = subprocess.Popen(  # noqa: S603 — commande construite par nos soins
             command,
@@ -303,7 +321,7 @@ def probe_processes() -> ProcessProbe:
     """
     try:
         if sys.platform == "win32":
-            out = subprocess.run(  # noqa: S603
+            out = run_hidden(
                 ["tasklist", "/NH", "/FO", "CSV"],
                 capture_output=True, text=True, timeout=10, check=False,
             )
@@ -312,7 +330,7 @@ def probe_processes() -> ProcessProbe:
             # sans le jeu, on obtient simplement une liste vide.
             if shutil.which("pgrep") is None:
                 return ProcessProbe(False, reason="`pgrep` indisponible sur ce système.")
-            out = subprocess.run(  # noqa: S603
+            out = run_hidden(
                 ["pgrep", "-a", "-i", "-f", "|".join(PROCESS_NAMES)],
                 capture_output=True, text=True, timeout=10, check=False,
             )

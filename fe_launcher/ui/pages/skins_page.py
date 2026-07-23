@@ -16,6 +16,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QScrollArea,
     QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -148,14 +149,25 @@ class SkinsPage(Page):
         grid = QGridLayout(grid_holder)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(METRICS.pad_sm)
-        cols = 5
+        cols = 4
         for i, entry in enumerate(skins.CHARACTERS):
             tile = PortraitTile(entry)
             tile.picked.connect(self._on_pick)
             self._group.addButton(tile)
             self._tiles[entry.alias] = tile
             grid.addWidget(tile, i // cols, i % cols)
-        self.gallery_card.body.addWidget(grid_holder)
+        grid.setColumnStretch(cols, 1)  # pousse les tuiles à gauche
+
+        # La grille a une largeur naturelle fixe (4 tuiles). Sans zone défilante, cette
+        # largeur se propage à toute la page : à la largeur d'ouverture (1120 px), la page
+        # débordait horizontalement et tronquait l'avertissement de lag ET le bouton
+        # « Appliquer » de la colonne de détail. Le QScrollArea absorbe l'excédent en
+        # interne (barre de défilement sur la galerie seule) et laisse le reste tenir.
+        gallery_scroll = QScrollArea()
+        gallery_scroll.setWidgetResizable(True)
+        gallery_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        gallery_scroll.setWidget(grid_holder)
+        self.gallery_card.body.addWidget(gallery_scroll, 1)
 
     # --- rendu ---
 

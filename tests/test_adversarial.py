@@ -624,10 +624,6 @@ def test_editeur_affiche_la_valeur_reelle_du_fichier(qapp, tmp_path, source, val
     assert affiche == valeur
 
 
-@pytest.mark.xfail(reason="BUG: le tableau de bord compare enabled_mods (TOUS les mods) "
-                          "à visible_mods (filtrés par le mode développeur) — il "
-                          "affiche « 3 actif(s) sur 2 » et contredit la page Mods",
-                   strict=True)
 def test_tableau_de_bord_et_page_mods_annoncent_le_meme_compte(qapp, tmp_path):
     noms = ["ue4ss-FEInfiniteCore", "ue4ss-FEMoonJump", "ue4ss-FEDevMenu"]
     ctx = AppContext(data_dir=tmp_path / "data")

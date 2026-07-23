@@ -363,7 +363,8 @@ class Ue4ssSetupDialog(QDialog):
                 and self.ctx.install.has_ue4ss):
             from ..core import modinstall
             mods_report = modinstall.install_all(
-                self.ctx.install.ue4ss, self.ctx.ledger)
+                self.ctx.install.ue4ss, self.ctx.ledger,
+                include_restricted=self.ctx.settings.developer_mode)
             report.add("Mods fournis", mods_report.ok, mods_report.message)
             self.ctx.refresh()
 
@@ -548,8 +549,12 @@ class DashboardPage(Page):
         #    ou UE4SS déjà là → « Réinstaller UE4SS » pour remplacer un build cassé.
         # Sans un moyen de réinstaller, un utilisateur coincé avec un UE4SS qui ne démarre
         # pas (mauvais build) ne pourrait rien faire depuis le launcher.
+        # « corriger le dossier » n'est mentionné QUE s'il y a réellement un chemin grec à
+        # corriger : sur une démo (chemin ASCII), promettre une correction inexistante est
+        # une sur-promesse.
         if not inst.has_ue4ss:
-            label = "Installer UE4SS et corriger le jeu"
+            label = ("Installer UE4SS et corriger le dossier" if inst.non_ascii_path
+                     else "Installer UE4SS")
         elif inst.non_ascii_path:
             label = "Réparer UE4SS et corriger le dossier"
         else:
@@ -749,8 +754,10 @@ class DashboardPage(Page):
         if result.warnings:
             QMessageBox.information(self, "Jeu lancé", "\n".join(result.warnings))
         # Le lancement a réussi : on commence à surveiller sa fermeture pour proposer le
-        # résumé des logs. Toute la logique de lancement ci-dessus reste inchangée — si la
-        # surveillance est indisponible, le jeu tourne quand même.
+        # résumé des logs. On MÉMORISE l'install lancée : si l'utilisateur bascule le
+        # sélecteur pendant qu'il joue, le résumé doit rester celui du jeu qui a
+        # réellement tourné, pas de l'install affichée à la fermeture.
+        self._watched_install = inst
         self._begin_watching()
 
     # --- surveillance de la fermeture du jeu ---
@@ -793,7 +800,10 @@ class DashboardPage(Page):
         """Le jeu s'est fermé : lit UE4SS.log et propose le dialogue de résumé."""
         if not self.ctx.settings.review_logs_on_close:
             return
-        layout = self.ctx.install.ue4ss if self.ctx.install is not None else None
+        # L'install LANCÉE, pas celle actuellement sélectionnée : l'utilisateur a pu
+        # changer de sélecteur entre-temps.
+        watched = getattr(self, "_watched_install", None) or self.ctx.install
+        layout = watched.ue4ss if watched is not None else None
         report = logs.read(layout)
         dialog = LogReviewDialog(report, self.ctx.data_dir / "logs", self)
         self._present_dialog(dialog)

@@ -401,8 +401,13 @@ class ModsPage(Page):
                 "Les mods s'installent dans UE4SS, qui n'est pas présent. "
                 "Installez d'abord UE4SS depuis le tableau de bord.")
             return
+        from ...core import moddocs
+        dev = self.ctx.settings.developer_mode
+        # On n'installe pas les mods restreints (FEDevMenu) hors mode développeur : les
+        # masquer dans la liste ne sert à rien si le bouton d'installation les pose.
         missing = [m.name for m in modinstall.bundled_mods()
-                   if not modinstall.is_installed(inst.ue4ss, m.name)]
+                   if not modinstall.is_installed(inst.ue4ss, m.name)
+                   and (dev or not moddocs.is_restricted(m.name))]
         if not missing:
             QMessageBox.information(self, "Rien à installer",
                                     "Tous les mods fournis sont déjà installés.")
