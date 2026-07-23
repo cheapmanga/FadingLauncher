@@ -87,21 +87,31 @@ tests/             suite pytest
 
 ## Installation
 
-Sur le PC de jeu (Windows) :
+### Windows — la plus simple
 
-```bat
-python -m venv .venv
-.venv\Scripts\pip install PySide6
-.venv\Scripts\python -m fe_launcher.app
-```
+1. Téléchargez le projet : bouton vert **Code → Download ZIP**, puis extrayez-le.
+2. Double-cliquez sur **`install.bat`**.
 
-En développement (Linux, sans le jeu) :
+Il vérifie que tout est présent et installe ce qui manque (Python, l'environnement, la
+dépendance graphique), puis crée un raccourci **Fading Echo Launcher** sur le Bureau. On
+peut le relancer à tout moment : il ne refait que ce qui n'est pas déjà en place.
+
+Pour lancer ensuite : le raccourci du Bureau, ou **`lancer.bat`**.
+
+### Windows — en faire un vrai .exe autonome (optionnel)
+
+Après `install.bat`, double-cliquez sur **`build_exe.bat`**. Il produit
+`dist\FadingEchoLauncher.exe` : un fichier unique qui ne nécessite plus rien pour tourner
+et que vous pouvez copier où vous voulez.
+
+### En développement (Linux, sans le jeu)
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install PySide6 pytest
 .venv/bin/python tools/make_fixture.py /tmp/fe-fixture   # installation simulée
 .venv/bin/python -m pytest tests/ -q
+.venv/bin/python run.py                                  # lance l'interface
 ```
 
 ---

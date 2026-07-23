@@ -22,3 +22,9 @@ Thumbs.db
 # On versionne le dossier mais pas les images elles-mêmes — voir resources/portraits/README.
 fe_launcher/resources/portraits/*.png
 fe_launcher/resources/portraits/*.jpg
+
+# Sorties de compilation PyInstaller
+/dist/
+/build/
+*.spec
+build_exe.log

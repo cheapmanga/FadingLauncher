@@ -27,10 +27,24 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+import sys
 from functools import lru_cache
 from pathlib import Path
 
-RESOURCES = Path(__file__).resolve().parent.parent / "resources" / "portraits"
+
+def _resources_dir() -> Path:
+    """Dossier des portraits, que l'app tourne depuis les sources ou depuis un .exe.
+
+    PyInstaller déballe les données dans un dossier temporaire pointé par
+    `sys._MEIPASS` : le chemin relatif au module ne vaut plus rien une fois l'app
+    compilée. On distingue donc les deux cas.
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "fe_launcher" / "resources" / "portraits"
+    return Path(__file__).resolve().parent.parent / "resources" / "portraits"
+
+
+RESOURCES = _resources_dir()
 
 # Nom du personnage tel qu'il apparaît DANS LES FICHIERS, par alias du mod FESkins.
 # Le jeu écrit « Rhane » (sans le premier a) : on colle à ses fichiers, pas à

@@ -1,0 +1,6 @@
+# Scripts Windows : toujours en CRLF, quel que soit l'OS qui clone.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# Le reste en LF.
+*.py text eol=lf
+*.md text eol=lf
