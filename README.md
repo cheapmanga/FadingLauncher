@@ -113,6 +113,8 @@ peut le relancer à tout moment : il ne refait que ce qui n'est pas déjà en pl
 
 Pour lancer ensuite : le raccourci du Bureau, ou **`lancer.bat`**.
 
+**Mettre à jour** (après un correctif) : double-cliquez sur **`update.bat`** — il télécharge la dernière version du code et remplace les fichiers, en gardant votre environnement. Bien plus rapide que de tout retélécharger.
+
 ### Windows — en faire un vrai .exe autonome (optionnel)
 
 Après `install.bat`, double-cliquez sur **`build_exe.bat`**. Il produit
