@@ -128,12 +128,10 @@ d'entre eux.
 
 ## Limites connues
 
-- **3 mods C++ ne sont pas compilés** (`FECheatUtils`, `KeystrokesKBM`, `KeystrokesPad`) :
-  aucune DLL présente. Le launcher les signale au lieu de laisser croire qu'ils marchent.
+- **Un mod C++ activé mais non compilé** (marqueur présent, aucune DLL) est signalé comme
+  tel, au lieu de laisser croire qu'il fonctionne.
 - **La plupart des mods Lua ne sont pas testés en jeu**, leurs auteurs le disent dans leurs
   propres notices. Le launcher ne peut pas garantir qu'un mod fonctionne, seulement qu'il
   est correctement installé et activé.
 - **Le rôle du suffixe `_P`, le dossier `~mods` et `LogicMods`** ne sont pas vérifiés sur ce
   jeu. Ils sont traités comme des hypothèses et signalés comme telles dans le code.
-- **Le mode développeur** masque `ue4ss-FEDevMenu` par défaut. Ce n'est pas un verrou : le
-  dossier reste sur le disque et peut être activé à la main. C'est un choix de présentation.
