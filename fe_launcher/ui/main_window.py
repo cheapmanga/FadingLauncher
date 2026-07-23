@@ -309,9 +309,9 @@ class Ue4ssSetupDialog(QDialog):
         self.run_btn.clicked.connect(self._run)
         buttons.addWidget(self.run_btn, 0)
         buttons.addStretch(1)
-        close = QPushButton("Fermer")
-        close.clicked.connect(self.accept)
-        buttons.addWidget(close, 0)
+        self.close_btn = QPushButton("Fermer")
+        self.close_btn.clicked.connect(self.accept)
+        buttons.addWidget(self.close_btn, 0)
         root.addLayout(buttons)
 
     def _choose_zip(self) -> None:
@@ -364,6 +364,18 @@ class Ue4ssSetupDialog(QDialog):
             self.ctx.refresh()
 
         self._render_report(report)
+
+        # Installation réussie : plus rien à relancer. Le bouton « Lancer » invite alors
+        # à recommencer une opération déjà faite ; on le transforme en « Fermer » pour que
+        # le geste évident (sortir) soit celui qui reste en avant.
+        if report.ok:
+            self.run_btn.setText("Fermer")
+            try:
+                self.run_btn.clicked.disconnect(self._run)
+            except (TypeError, RuntimeError):
+                pass
+            self.run_btn.clicked.connect(self.accept)
+            self.close_btn.hide()
 
     def _render_report(self, report: SetupReport) -> None:
         while self.report_layout.count():
