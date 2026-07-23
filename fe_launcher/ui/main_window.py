@@ -346,9 +346,13 @@ class Ue4ssSetupDialog(QDialog):
         test). `ctx.discover()` reconstruit ensuite l'état disque : le renommage a changé
         le chemin de l'install, la garder en mémoire pointerait sur un dossier disparu.
         """
+        # Si UE4SS est déjà là, on RÉINSTALLE par-dessus : c'est le cas quand un build
+        # cassé ou incomplet a été posé et qu'il faut le remplacer.
+        reinstall = self.ctx.install is not None and self.ctx.install.has_ue4ss
         report = ue4ss_setup.run(
             self.ctx.install, self.ctx.ledger,
-            ue4ss_zip=self._zip, probe=doctor.steam_processes_running)
+            ue4ss_zip=self._zip, reinstall=reinstall,
+            probe=doctor.steam_processes_running)
         # `discover()` reconstruit l'état : le renommage a changé le chemin de l'install.
         self.ctx.discover()
 
@@ -538,16 +542,23 @@ class DashboardPage(Page):
         path.setWordWrap(True)
         self.install_card.body.addWidget(path)
 
-        # Bouton d'installation/réparation d'UE4SS. Proposé dès qu'il manque UE4SS OU que
-        # le chemin contient un caractère non-ASCII : ce dernier cas est le piège du jeu
-        # complet (`Project Ygrό`), où UE4SS est « présent » mais meurt au démarrage. Les
-        # deux se règlent par la même opération, d'où un seul bouton.
-        if not inst.has_ue4ss or inst.non_ascii_path:
-            self.ue4ss_btn = QPushButton("Installer UE4SS et corriger le jeu")
-            self.ue4ss_btn.setObjectName("Primary")
-            self.ue4ss_btn.clicked.connect(self._install_ue4ss)
-            self.install_card.body.addWidget(
-                self.ue4ss_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        # Bouton d'installation/réparation d'UE4SS, TOUJOURS proposé :
+        #  - UE4SS absent    → « Installer UE4SS » ;
+        #  - chemin non-ASCII (piège `Project Ygrό`, UE4SS « présent » mais mort au boot)
+        #    ou UE4SS déjà là → « Réinstaller UE4SS » pour remplacer un build cassé.
+        # Sans un moyen de réinstaller, un utilisateur coincé avec un UE4SS qui ne démarre
+        # pas (mauvais build) ne pourrait rien faire depuis le launcher.
+        if not inst.has_ue4ss:
+            label = "Installer UE4SS et corriger le jeu"
+        elif inst.non_ascii_path:
+            label = "Réparer UE4SS et corriger le dossier"
+        else:
+            label = "Réinstaller UE4SS"
+        self.ue4ss_btn = QPushButton(label)
+        self.ue4ss_btn.setObjectName("Primary")
+        self.ue4ss_btn.clicked.connect(self._install_ue4ss)
+        self.install_card.body.addWidget(
+            self.ue4ss_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
     def _render_diagnoses(self) -> None:
         self._clear(self.diag_card)

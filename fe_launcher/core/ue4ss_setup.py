@@ -52,17 +52,21 @@ class DownloadResult:
 def _pick_asset(assets: list[dict]) -> dict | None:
     """Choisit le meilleur .zip d'une release UE4SS.
 
-    On préfère le build standard `UE4SS_v*.zip` : plus léger (~5 Mo) et suffisant pour
-    des mods Lua, qui sont les seuls qu'on embarque. Les variantes `z*` (zDEV, zCustom,
-    zMapGen) sont des extras — on ne les prend qu'à défaut de build standard.
+    On préfère le build **zDEV** (`zDEV-UE4SS_v*.zip`), pas le standard. Fading Echo est
+    un fork custom d'UE 5.6.1 : sans les dossiers `MemberVarLayoutTemplates` /
+    `VTableLayoutTemplates` (présents dans zDEV, absents du build standard), UE4SS ne
+    trouve pas la disposition mémoire du moteur et meurt à l'init — log à 0 octet, aucune
+    console. Le build standard est plus léger mais ne démarre pas sur ce jeu. Vérifié.
+    Les autres extras (`zCustomGameConfigs`, `zMapGenBP`) ne sont pas des builds complets.
     """
     zips = [a for a in assets if a.get("name", "").lower().endswith(".zip")]
     if not zips:
         return None
+    zdev = [a for a in zips if a["name"].lower().startswith("zdev-ue4ss")]
     standard = [a for a in zips
                 if a["name"].lower().startswith("ue4ss_")
                 and not a["name"].lower().startswith("z")]
-    return (standard or zips)[0]
+    return (zdev or standard or zips)[0]
 
 
 def download_ue4ss(dest_dir: Path, *, timeout: int = 60) -> DownloadResult:
@@ -151,14 +155,16 @@ def _safe_members(z: zipfile.ZipFile, dest: Path) -> list[zipfile.ZipInfo]:
 
 
 def install_ue4ss(install: GameInstall, zip_path: Path, ledger: Ledger,
-                  report: SetupReport) -> bool:
+                  report: SetupReport, *, replace: bool = False) -> bool:
     """Extrait UE4SS dans Binaries/Win64. Chaque fichier créé est journalisé.
 
-    On n'écrase JAMAIS un UE4SS déjà présent : si `UE4SS-settings.ini` existe, on
-    considère l'install faite et on ne touche à rien (la config de l'utilisateur pourrait
-    être personnalisée).
+    Par défaut on n'écrase pas un UE4SS déjà présent (la config pourrait être
+    personnalisée). Avec `replace=True`, on réinstalle par-dessus : les fichiers d'UE4SS
+    sont réécrits (sauvegardés au journal, donc réversibles), ce qui permet de remplacer
+    un build cassé ou incomplet sans que l'utilisateur ait à nettoyer à la main. Les mods
+    du dossier `Mods/` ne sont pas touchés (le zip ne les contient pas).
     """
-    if install.has_ue4ss:
+    if install.has_ue4ss and not replace:
         report.add("UE4SS déjà présent", True, "aucune réinstallation.")
         return True
     if not looks_like_ue4ss_zip(zip_path):
@@ -225,19 +231,22 @@ def run(install: GameInstall, ledger: Ledger, *,
         ue4ss_zip: Path | None = None,
         download_dir: Path | None = None,
         allow_download: bool = True,
+        reinstall: bool = False,
         probe=doctor.steam_processes_running) -> SetupReport:
     """Installe UE4SS puis corrige le chemin grec au besoin.
 
-    UE4SS est TÉLÉCHARGÉ automatiquement depuis GitHub si aucune archive n'est fournie et
-    que le jeu n'en a pas encore — l'utilisateur n'a rien à donner. Un `ue4ss_zip` fourni
-    prend le pas sur le téléchargement (utile hors ligne ou pour une version précise).
+    UE4SS est TÉLÉCHARGÉ automatiquement depuis GitHub si aucune archive n'est fournie —
+    l'utilisateur n'a rien à donner. Un `ue4ss_zip` fourni prend le pas sur le
+    téléchargement. `reinstall=True` réinstalle par-dessus un UE4SS déjà présent : utile
+    pour remplacer un build cassé ou incomplet.
 
     Retourne un rapport détaillé étape par étape.
     """
     report = SetupReport(ok=True)
+    needs_ue4ss = reinstall or not install.has_ue4ss
 
     # 1. UE4SS : archive fournie, sinon téléchargement automatique.
-    if not install.has_ue4ss and ue4ss_zip is None and allow_download:
+    if needs_ue4ss and ue4ss_zip is None and allow_download:
         dest = download_dir or (Path(ledger.root) / "downloads")
         dl = download_ue4ss(dest)
         report.add("Téléchargement d'UE4SS", dl.ok, dl.message)
@@ -247,7 +256,7 @@ def run(install: GameInstall, ledger: Ledger, *,
             report.ok = False
 
     if ue4ss_zip is not None:
-        if not install_ue4ss(install, Path(ue4ss_zip), ledger, report):
+        if not install_ue4ss(install, Path(ue4ss_zip), ledger, report, replace=reinstall):
             report.ok = False
     elif not install.has_ue4ss:
         report.add("UE4SS à installer", False,

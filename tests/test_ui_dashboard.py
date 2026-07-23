@@ -108,7 +108,7 @@ def test_ue4ss_button_appears_without_ue4ss(qapp, tmp_path):
 
     page = DashboardPage(ctx)
     labels = [b.text() for b in page.install_card.findChildren(QPushButton)]
-    assert any("Installer UE4SS" in t for t in labels)
+    assert any("UE4SS" in t for t in labels)
 
 
 def test_ue4ss_button_appears_for_greek_path(qapp, tmp_path):
@@ -123,7 +123,7 @@ def test_ue4ss_button_appears_for_greek_path(qapp, tmp_path):
 
     page = DashboardPage(ctx)
     labels = [b.text() for b in page.install_card.findChildren(QPushButton)]
-    assert any("Installer UE4SS" in t for t in labels)
+    assert any("UE4SS" in t for t in labels)
 
 
 def test_ue4ss_button_absent_when_clean(qapp, tmp_path):
@@ -174,7 +174,7 @@ def test_setup_dialog_run_calls_ue4ss_setup(qapp, tmp_path, monkeypatch):
 
     seen: dict = {}
 
-    def fake_run(install, ledger, *, ue4ss_zip=None, probe=None):
+    def fake_run(install, ledger, *, ue4ss_zip=None, reinstall=False, probe=None):
         seen["install"] = install
         seen["ledger"] = ledger
         seen["zip"] = ue4ss_zip

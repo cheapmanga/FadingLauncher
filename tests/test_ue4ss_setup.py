@@ -65,10 +65,12 @@ def test_refuse_si_steam_tourne(tmp_path):
     assert not fix_step.ok
 
 
-def test_pick_asset_prefere_le_build_standard():
-    assets = [{"name": "zDEV-UE4SS_v3.0.1.zip"}, {"name": "UE4SS_v3.0.1.zip"},
+def test_pick_asset_prefere_le_build_zdev():
+    # Le build zDEV contient les templates de layout memoire indispensables au fork
+    # UE 5.6.1 du jeu ; le standard, plus leger, ne demarre pas dessus.
+    assets = [{"name": "UE4SS_v3.0.1.zip"}, {"name": "zDEV-UE4SS_v3.0.1.zip"},
               {"name": "zMapGenBP.zip"}]
-    assert ue4ss_setup._pick_asset(assets)["name"] == "UE4SS_v3.0.1.zip"
+    assert ue4ss_setup._pick_asset(assets)["name"] == "zDEV-UE4SS_v3.0.1.zip"
 
 
 def test_download_echoue_proprement_sans_reseau(tmp_path, monkeypatch):
