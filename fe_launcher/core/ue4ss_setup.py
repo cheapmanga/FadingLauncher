@@ -36,9 +36,65 @@ LEDGER_GROUP = "ue4ss-setup"
 # Fichiers/dossiers qui prouvent qu'une archive est bien UE4SS.
 _UE4SS_MARKERS = ("dwmapi.dll", "UE4SS-settings.ini")
 
-# Dépôt officiel d'UE4SS. On télécharge l'asset .zip de la dernière release plutôt que de
-# coder une URL en dur : les numéros de version changent, l'API des releases non.
-UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases/latest"
+
+def _bundle_dir() -> Path:
+    """Dossier du build UE4SS embarqué (l'install de référence, prouvée sur ce jeu)."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "fe_launcher" / "resources" / "ue4ss_bundle"
+    return Path(__file__).resolve().parent.parent / "resources" / "ue4ss_bundle"
+
+
+def has_bundle() -> bool:
+    b = _bundle_dir()
+    return (b / "dwmapi.dll").is_file() and (b / "ue4ss" / "UE4SS-settings.ini").is_file()
+
+
+def install_from_bundle(install: GameInstall, ledger: Ledger, report: SetupReport,
+                        *, replace: bool = False) -> bool:
+    """Installe le build UE4SS embarqué dans le jeu, structure NESTED exacte.
+
+    C'est la voie normale : on copie l'install de référence — celle qui fonctionne
+    réellement sur ce jeu, avec ses réglages (`GraphicsAPI = opengl`, `RenderMode =
+    ExternalThread`, indispensables sur ce moteur DX12), ses templates de layout mémoire
+    et ses signatures. Pas de téléchargement, pas de build au hasard.
+
+    Structure posée, identique au PC de jeu :
+        Win64/dwmapi.dll          (le proxy que le jeu charge)
+        Win64/ue4ss/…             (UE4SS.dll, settings, Mods, templates, signatures)
+    """
+    if install.has_ue4ss and not replace:
+        report.add("UE4SS déjà présent", True, "aucune réinstallation.")
+        return True
+    src = _bundle_dir()
+    if not has_bundle():
+        return False
+
+    win64 = install.engine_dir
+    try:
+        # 1. le proxy à la racine de Win64.
+        ledger.create_file(win64 / "dwmapi.dll", (src / "dwmapi.dll").read_bytes(),
+                           label="UE4SS : dwmapi.dll", group=LEDGER_GROUP)
+        # 2. tout le reste dans Win64/ue4ss/, en préservant l'arborescence.
+        ue4ss_src = src / "ue4ss"
+        for f in ue4ss_src.rglob("*"):
+            if f.is_file():
+                rel = f.relative_to(ue4ss_src)
+                ledger.create_file(win64 / "ue4ss" / rel, f.read_bytes(),
+                                   label=f"UE4SS : ue4ss/{rel}", group=LEDGER_GROUP)
+    except OSError as exc:
+        report.add("Installation d'UE4SS", False, str(exc))
+        return False
+
+    report.add("UE4SS installé", True,
+               "build de référence posé : dwmapi.dll dans Win64\\, le reste dans "
+               "Win64\\ue4ss\\ (avec templates, signatures et réglages OpenGL).")
+    return True
+
+# Dépôt officiel d'UE4SS. On vise la release `experimental-latest` (la nightly), pas la
+# `latest` stable : c'est la nightly zDEV qui fonctionne sur ce jeu (fork UE 5.6.1). Le
+# build de référence embarqué en vient — repli seulement, la source normale est le bundle.
+UE4SS_RELEASES_API = ("https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases/tags/"
+                      "experimental-latest")
 
 
 @dataclass
@@ -173,23 +229,34 @@ def install_ue4ss(install: GameInstall, zip_path: Path, ledger: Ledger,
         return False
 
     win64 = install.engine_dir
+    # LAYOUT NESTED, tel que l'install qui fonctionne sur ce jeu : SEUL `dwmapi.dll` (le
+    # proxy que le jeu charge) reste dans Win64 ; TOUT le reste — UE4SS.dll, settings,
+    # Mods, templates de layout, signatures — va dans `Win64/ue4ss/`. Une extraction à
+    # plat (tout dans Win64) fait que `dwmapi.dll` ne trouve pas `ue4ss/UE4SS.dll` et
+    # UE4SS ne démarre pas (log à 0 octet). C'est le layout exact du PC de jeu.
+    ue4ss_dir = win64 / "ue4ss"
     try:
         with zipfile.ZipFile(zip_path) as z:
             members = _safe_members(z, win64)
             for info in members:
                 if info.is_dir():
                     continue
-                target = win64 / info.filename
+                name = info.filename
+                # Le proxy reste à la racine de Win64 ; le reste descend dans ue4ss/.
+                if name.lower() == "dwmapi.dll":
+                    target = win64 / "dwmapi.dll"
+                else:
+                    target = ue4ss_dir / name
                 data = z.read(info)
                 # create_file écrit puis journalise : réversible, et refuse d'écraser un
                 # fichier existant sans le sauvegarder.
                 ledger.create_file(target, data,
-                                   label=f"UE4SS : {info.filename}", group=LEDGER_GROUP)
+                                   label=f"UE4SS : {name}", group=LEDGER_GROUP)
     except (OSError, zipfile.BadZipFile) as exc:
         report.add("Extraction d'UE4SS", False, str(exc))
         return False
 
-    report.add("UE4SS installé", True, f"extrait dans {win64.name}\\")
+    report.add("UE4SS installé", True, "dwmapi.dll dans Win64\\, le reste dans Win64\\ue4ss\\")
     _deploy_signatures(win64, ledger, report)
     return True
 
@@ -235,33 +302,40 @@ def run(install: GameInstall, ledger: Ledger, *,
         probe=doctor.steam_processes_running) -> SetupReport:
     """Installe UE4SS puis corrige le chemin grec au besoin.
 
-    UE4SS est TÉLÉCHARGÉ automatiquement depuis GitHub si aucune archive n'est fournie —
-    l'utilisateur n'a rien à donner. Un `ue4ss_zip` fourni prend le pas sur le
-    téléchargement. `reinstall=True` réinstalle par-dessus un UE4SS déjà présent : utile
-    pour remplacer un build cassé ou incomplet.
+    Ordre des sources d'UE4SS, de la plus fiable à la moins :
+      1. le build EMBARQUÉ (`install_from_bundle`) — l'install de référence prouvée sur ce
+         jeu, avec ses réglages OpenGL et ses templates. C'est la voie normale.
+      2. un `ue4ss_zip` fourni à la main (hors ligne, version précise).
+      3. à défaut, téléchargement de la nightly zDEV (structure à plat, réglages par
+         défaut : moins bon, mais mieux que rien).
+    `reinstall=True` réinstalle par-dessus un UE4SS déjà présent.
 
     Retourne un rapport détaillé étape par étape.
     """
     report = SetupReport(ok=True)
     needs_ue4ss = reinstall or not install.has_ue4ss
 
-    # 1. UE4SS : archive fournie, sinon téléchargement automatique.
-    if needs_ue4ss and ue4ss_zip is None and allow_download:
-        dest = download_dir or (Path(ledger.root) / "downloads")
-        dl = download_ue4ss(dest)
-        report.add("Téléchargement d'UE4SS", dl.ok, dl.message)
-        if dl.ok:
-            ue4ss_zip = dl.path
-        else:
+    if needs_ue4ss and ue4ss_zip is None and has_bundle():
+        # Voie normale : le build de référence embarqué.
+        if not install_from_bundle(install, ledger, report, replace=reinstall):
             report.ok = False
-
-    if ue4ss_zip is not None:
-        if not install_ue4ss(install, Path(ue4ss_zip), ledger, report, replace=reinstall):
-            report.ok = False
-    elif not install.has_ue4ss:
-        report.add("UE4SS à installer", False,
-                   "aucune archive et téléchargement indisponible. Réessayez avec une "
-                   "connexion, ou fournissez le .zip d'UE4SS.")
+    else:
+        # Replis : zip fourni, sinon téléchargement de la nightly.
+        if needs_ue4ss and ue4ss_zip is None and allow_download:
+            dest = download_dir or (Path(ledger.root) / "downloads")
+            dl = download_ue4ss(dest)
+            report.add("Téléchargement d'UE4SS", dl.ok, dl.message)
+            if dl.ok:
+                ue4ss_zip = dl.path
+            else:
+                report.ok = False
+        if ue4ss_zip is not None:
+            if not install_ue4ss(install, Path(ue4ss_zip), ledger, report,
+                                 replace=reinstall):
+                report.ok = False
+        elif not install.has_ue4ss:
+            report.add("UE4SS à installer", False,
+                       "build embarqué absent et téléchargement indisponible.")
 
     # 2. Correctif du chemin grec, uniquement s'il est nécessaire.
     if install.non_ascii_path:

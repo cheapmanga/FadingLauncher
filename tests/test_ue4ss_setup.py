@@ -15,8 +15,8 @@ from tools import make_fixture
 def _fake_ue4ss_zip(path: Path) -> Path:
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("dwmapi.dll", b"DLL")
-        z.writestr("ue4ss/UE4SS-settings.ini", b"[General]\n")
-        z.writestr("ue4ss/Mods/mods.txt", b"")
+        z.writestr("UE4SS-settings.ini", b"[General]\n")
+        z.writestr("Mods/mods.txt", b"")
         z.writestr("../evil.txt", b"zip-slip")  # doit être rejeté
     return path
 
@@ -85,7 +85,8 @@ def test_run_telecharge_si_pas_de_zip(tmp_path, monkeypatch):
     inst = _install_no_ue4ss(tmp_path)
     (tmp_path / "dl").mkdir()
     z = _fake_ue4ss_zip(tmp_path / "dl" / "UE4SS_vX.zip")
-    # simule un téléchargement réussi qui renvoie notre faux zip
+    # bundle desactive pour forcer le repli telechargement
+    monkeypatch.setattr(ue4ss_setup, "has_bundle", lambda: False)
     monkeypatch.setattr(ue4ss_setup, "download_ue4ss",
                         lambda dest, **k: ue4ss_setup.DownloadResult(True, z, "vX", "ok"))
     led = Ledger(tmp_path / "led")

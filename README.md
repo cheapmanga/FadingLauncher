@@ -39,7 +39,8 @@ gagnant tant que l'écart n'est pas significatif.
 
 Le launcher embarque de quoi partir de zéro, sans chercher un seul fichier :
 
-- **UE4SS + correctif du chemin grec** en un bouton (vous fournissez le .zip d'UE4SS).
+- **UE4SS + correctif du chemin grec** en un bouton — UE4SS est EMBARQUÉ (le build
+  qui fonctionne sur ce jeu, réglages OpenGL compris), rien à fournir ni télécharger.
 - **17 mods** prêts à installer, avec leur dépendance UEHelpers.
 - **15 sauvegardes** à différents points de progression, chargeables en un clic.
 - **Prévisualisation des skins** avec les portraits du jeu.
