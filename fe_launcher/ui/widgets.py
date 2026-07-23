@@ -22,15 +22,88 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QMargins, QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLayout,
     QLineEdit, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from ..core.luaconf import LuaSetting, LuaType
 from .theme import METRICS, PALETTE, badge_style
+
+
+class FlowLayout(QLayout):
+    """Disposition qui fait passer ses widgets à la ligne selon la largeur disponible.
+
+    Qt n'en fournit pas ; c'est l'implémentation de référence des exemples Qt, adaptée.
+    Chaque enfant garde sa taille idéale et on remplit ligne par ligne, en repassant à la
+    ligne dès qu'un élément déborde. C'est ce qui rend une galerie de cartes RESPONSIVE :
+    une fenêtre large montre quatre cartes de front, une fenêtre étroite une seule, sans
+    calcul de colonnes en dur. L'espacement horizontal ET vertical vaut `spacing`.
+    """
+
+    def __init__(self, parent: QWidget | None = None, *, spacing: int = METRICS.pad):
+        super().__init__(parent)
+        self._items: list = []
+        self._spacing = spacing
+        self.setContentsMargins(QMargins(0, 0, 0, 0))
+
+    # --- API QLayout obligatoire ---
+    def addItem(self, item) -> None:  # noqa: N802 — API Qt
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):  # noqa: N802
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):  # noqa: N802
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        return self._layout(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802
+        super().setGeometry(rect)
+        self._layout(rect, apply=True)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:  # noqa: N802
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    # --- cœur : place les éléments, renvoie la hauteur totale ---
+    def _layout(self, rect: QRect, *, apply: bool) -> int:
+        m = self.contentsMargins()
+        eff = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y, line_h = eff.x(), eff.y(), 0
+        for item in self._items:
+            hint = item.sizeHint()
+            next_x = x + hint.width() + self._spacing
+            if next_x - self._spacing > eff.right() and line_h > 0:
+                # débordement : on passe à la ligne suivante.
+                x = eff.x()
+                y += line_h + self._spacing
+                next_x = x + hint.width() + self._spacing
+                line_h = 0
+            if apply:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x = next_x
+            line_h = max(line_h, hint.height())
+        return y + line_h - rect.y() + m.bottom()
 
 
 class ComboBox(QComboBox):

@@ -86,9 +86,10 @@ class ModRow(QFrame):
         self._apply_selection(selected)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(METRICS.pad_sm, METRICS.pad_sm,
-                                METRICS.pad_sm, METRICS.pad_sm)
-        root.setSpacing(3)
+        # Plus de marge interne : une ligne serrée « colle » son contenu aux bords et se
+        # lit comme un tableau dense. On lui donne de l'air.
+        root.setContentsMargins(METRICS.pad, METRICS.pad_sm, METRICS.pad, METRICS.pad_sm)
+        root.setSpacing(METRICS.pad_sm)
 
         head = QHBoxLayout()
         head.setSpacing(METRICS.pad_sm)
@@ -198,7 +199,7 @@ class ModsPage(Page):
         root = QVBoxLayout(self)
         root.setContentsMargins(METRICS.pad_lg, METRICS.pad_lg,
                                 METRICS.pad_lg, METRICS.pad_lg)
-        root.setSpacing(METRICS.pad)
+        root.setSpacing(METRICS.pad_lg)
 
         self.header = PageHeader(
             "Mods",
@@ -229,7 +230,8 @@ class ModsPage(Page):
         self.list_holder = QWidget()
         self.list_layout = QVBoxLayout(self.list_holder)
         self.list_layout.setContentsMargins(0, 0, 0, 0)
-        self.list_layout.setSpacing(METRICS.pad_sm)
+        # Plus d'écart entre les lignes : les mods respirent au lieu de s'empiler.
+        self.list_layout.setSpacing(METRICS.pad)
         left.addWidget(self.list_holder)
         left.addStretch(1)
         columns.addLayout(left, 4)

@@ -36,10 +36,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QWidget  # noqa: E402
 
 from tests.conftest import make_install  # noqa: E402
-from fe_launcher.core import luaconf, saves as saves_mod  # noqa: E402
+from fe_launcher.core import luaconf, savelib, saves as saves_mod  # noqa: E402
 from fe_launcher.core.bench import Outcome  # noqa: E402
 from fe_launcher.ui.context import AppContext  # noqa: E402
 from fe_launcher.ui.pages.bench_page import BenchPage, parse_steps  # noqa: E402
@@ -393,3 +393,27 @@ def test_suppression_d_un_instantane(saves_page: SavesPage, game_saves: Path):
     assert saves_mod.list_slots(game_saves) == []
     # Les fichiers du jeu ne sont pas touchés par la suppression d'un instantané.
     assert (game_saves / "LastCheckpoint.sav").is_file()
+
+
+def test_bibliotheque_est_une_grille_responsive(saves_page: SavesPage, tmp_path: Path):
+    """Les saves s'affichent en cartes qui se replient selon la largeur (FlowLayout).
+
+    Régression du look : la bibliothèque était une pile d'une carte par ligne. On veut
+    une galerie qui montre plus de colonnes quand la fenêtre s'élargit.
+    """
+    from fe_launcher.ui.widgets import FlowLayout
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+    for n in saves_mod.GAME_SAVE_FILES:
+        (save_root / n).write_bytes(b"\x00" * 16)
+    saves_page.set_save_root(save_root)
+
+    cards = [w for w in saves_page.findChildren(QFrame) if w.objectName() == "SaveCard"]
+    assert len(cards) == len(savelib.bundled_saves()) >= 15
+
+    # Le reflow se mesure directement sur le FlowLayout : plus large => moins haut.
+    flow = next(w.layout() for w in saves_page.findChildren(QWidget)
+                if isinstance(w.layout(), FlowLayout))
+    tall = flow.heightForWidth(300)     # étroit : une colonne, haut
+    wide = flow.heightForWidth(1100)    # large : plusieurs colonnes, bas
+    assert wide < tall, "la grille doit se replier : plus de largeur => moins de hauteur"

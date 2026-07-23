@@ -6,10 +6,16 @@ Choix assumés et leurs raisons
 parfois pendant des sessions de plusieurs heures. Un fond clair à côté d'un jeu sombre
 est agressif et pollue une capture d'écran.
 
-**Un seul accent, cyan.** L'interface affiche en permanence des états (mod actif,
-diagnostic, essai HIT/MISS). Multiplier les couleurs d'accent rendrait les états
-sémantiques illisibles. Le cyan est réservé à l'interaction ; le vert, l'ambre et le
-rouge ne servent QU'À l'état. Un bouton n'est jamais vert : le vert veut dire « ça va ».
+**Un accent d'interaction, cyan — le core d'eau du jeu.** L'interface affiche en
+permanence des états (mod actif, diagnostic, essai HIT/MISS) : l'accent cyan est réservé
+à l'INTERACTION, et le vert/ambre/rouge QU'À l'état sémantique. Un bouton n'est jamais
+vert : le vert veut dire « ça va ». Les couleurs des cinq cores (eau, lave, déchet,
+corruption, énergie) forment, elles, l'identité Fading Echo : elles servent de touches
+DÉCORATIVES (bannière, liserés, badges d'élément), jamais à coder un état.
+
+**Atmosphère, pas platitude.** Fonds bleu-nuit dégradés (indigo → noir profond) sur la
+barre latérale et les en-têtes, bordures qui s'illuminent à l'accent : un look de
+launcher fanmade autour du jeu, pas un tableur gris.
 
 **Densité élevée.** Une campagne affiche des dizaines de lignes de mesure. On vise la
 lisibilité d'un tableau de bord, pas l'espacement d'une page marketing.
@@ -28,48 +34,69 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Palette:
-    # Fonds, du plus profond au plus clair.
-    bg: str = "#0e1116"           # fenêtre
-    surface: str = "#161b22"      # panneaux, cartes
-    surface_alt: str = "#1c2430"  # lignes alternées, en-têtes de tableau
-    border: str = "#2a3441"
+    # Fonds, du plus profond au plus clair. Teintés bleu-nuit plutôt que gris neutre :
+    # le monde de Fading Echo est éthéré, pas terne. Ces valeurs servent aussi de bornes
+    # aux dégradés atmosphériques posés sur la barre latérale et les en-têtes.
+    bg: str = "#080b11"           # fenêtre
+    bg_deep: str = "#05070b"      # borne basse des dégradés
+    indigo: str = "#0f1830"       # borne haute des dégradés (nuit indigo)
+    surface: str = "#111823"      # panneaux, cartes
+    surface_alt: str = "#1a2533"  # lignes alternées, en-têtes de tableau, tuiles
+    border: str = "#26333f"
+    border_glow: str = "#2ec4d6"  # bordure d'emphase, teinte accent
 
     # Textes.
-    text: str = "#e6edf3"
-    text_dim: str = "#9aa7b4"     # 5.0:1 sur bg — secondaire, jamais critique
-    text_faint: str = "#6b7785"   # décoratif uniquement, jamais pour de l'information
+    text: str = "#e9f1f8"
+    text_dim: str = "#98a7b6"     # secondaire, jamais critique
+    text_faint: str = "#66727f"   # décoratif uniquement, jamais pour de l'information
 
-    # Interaction — réservé à l'accent.
-    accent: str = "#2ec4d6"
-    accent_hover: str = "#4fd8e8"
-    accent_press: str = "#1ea5b5"
-    accent_text: str = "#06232a"  # texte SUR l'accent
+    # Interaction — l'accent signature, le core d'eau du jeu.
+    accent: str = "#33cfe0"
+    accent_hover: str = "#5ce2f1"
+    accent_press: str = "#1fa7b8"
+    accent_text: str = "#03212a"  # texte SUR l'accent
 
     # États sémantiques — jamais utilisés pour de l'interaction.
-    ok: str = "#3fb950"
-    warn: str = "#d29922"
-    error: str = "#f85149"
-    ok_bg: str = "#12261a"
-    warn_bg: str = "#2a2113"
-    error_bg: str = "#2d1618"
+    ok: str = "#46c95a"
+    warn: str = "#e0a62b"
+    error: str = "#fb5a52"
+    ok_bg: str = "#0f2a1b"
+    warn_bg: str = "#2c2412"
+    error_bg: str = "#2f1719"
 
-    # Mesure : HIT et MISS doivent se distinguer même en vision dichromate, d'où
-    # le couple cyan/magenta plutôt que vert/rouge, qui est le couple le plus
-    # fréquemment confondu. Le vert reste réservé aux diagnostics « ça va ».
-    hit: str = "#3fb950"
-    miss: str = "#8b949e"
-    voided: str = "#6b7785"
+    # --- Cores élémentaires de Fading Echo ---
+    # L'identité visuelle du jeu. Servent de touches décoratives (bannière, accents de
+    # cartes, badges d'éléments) pour casser la monotonie — jamais pour un état sémantique.
+    water: str = "#33cfe0"
+    lava: str = "#ff7a45"
+    waste: str = "#b6e14b"
+    corruption: str = "#b072ff"
+    power: str = "#ffd24a"
+
+    # Mesure : HIT et MISS doivent se distinguer même en vision dichromate. Le vert
+    # reste réservé aux diagnostics « ça va ».
+    hit: str = "#46c95a"
+    miss: str = "#8b98a6"
+    voided: str = "#66727f"
+
+    @property
+    def elements(self) -> tuple[str, ...]:
+        """Les cinq cores, dans l'ordre du jeu — pour un liseré arc-en-ciel, etc."""
+        return (self.water, self.lava, self.waste, self.corruption, self.power)
 
 
 @dataclass(frozen=True)
 class Metrics:
     radius: int = 6
     radius_sm: int = 4
-    pad: int = 12
-    pad_sm: int = 8
-    pad_lg: int = 18
-    sidebar_w: int = 208
-    row_h: int = 30
+    # Espacements partagés par TOUTE l'interface (marges de cartes, écarts de listes,
+    # rythme des pages). Montés d'un cran — l'ancien jeu (8/12/18) tassait le contenu au
+    # point d'être indigeste. Un seul endroit à régler, tous les écrans respirent.
+    pad: int = 16
+    pad_sm: int = 10
+    pad_lg: int = 26
+    sidebar_w: int = 232
+    row_h: int = 34
     font: str = "'Segoe UI', 'Inter', 'DejaVu Sans', sans-serif"
     # Les valeurs numériques (délais, taux, compteurs) sont en chasse fixe : elles
     # sont lues en colonne et comparées entre elles, l'alignement des chiffres compte.
@@ -114,7 +141,12 @@ QWidget {{
     color: {p.text};
 }}
 
-QMainWindow, QDialog {{ background: {p.bg}; }}
+/* Fond de fenêtre : un dégradé nuit très sombre plutôt qu'un aplat, pour donner de la
+   profondeur sans jamais concurrencer le contenu. */
+QMainWindow, QDialog {{
+    background: qlineargradient(x1:0, y1:0, x2:0.6, y2:1,
+        stop:0 {p.indigo}, stop:0.55 {p.bg}, stop:1 {p.bg_deep});
+}}
 
 /* Les widgets « feuilles » doivent laisser voir le fond de leur conteneur. Sans ça, la
    règle `QWidget` ci-dessus leur peint le fond de la FENÊTRE, et chaque texte ou case
@@ -125,15 +157,33 @@ QLabel, QCheckBox, QRadioButton {{ background: transparent; }}
 /* --- Barre latérale de navigation --- */
 
 #Sidebar {{
-    background: {p.surface};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 {p.indigo}, stop:0.5 {p.surface}, stop:1 {p.bg_deep});
     border-right: 1px solid {p.border};
 }}
 
 #SidebarBrand {{
     color: {p.text};
     font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: {m.pad}px 0 2px 0;
+}}
+#SidebarBrandSub {{
+    color: {p.accent};
+    font-size: 10px;
     font-weight: 600;
-    padding: {m.pad_lg}px {m.pad}px {m.pad_sm}px {m.pad}px;
+    letter-spacing: 2px;
+    padding: 0 {m.pad}px {m.pad_sm}px {m.pad}px;
+}}
+#SidebarArt {{
+    /* liseré des cinq cores sous la bannière : l'identité du jeu en une bande fine. */
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {p.water}, stop:0.25 {p.lava}, stop:0.5 {p.waste},
+        stop:0.75 {p.corruption}, stop:1 {p.power});
+    min-height: 2px; max-height: 2px;
+    margin: 0 {m.pad}px {m.pad_sm}px {m.pad}px;
+    border-radius: 1px;
 }}
 
 #SidebarVersion {{
@@ -148,8 +198,8 @@ QPushButton#NavButton {{
     border-radius: {m.radius_sm}px;
     color: {p.text_dim};
     text-align: left;
-    padding: 9px {m.pad}px;
-    margin: 1px {m.pad_sm}px;
+    padding: 11px {m.pad}px;
+    margin: 2px {m.pad_sm}px;
     font-size: 13px;
 }}
 QPushButton#NavButton:hover {{
@@ -157,7 +207,10 @@ QPushButton#NavButton:hover {{
     color: {p.text};
 }}
 QPushButton#NavButton:checked {{
-    background: {p.surface_alt};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {p.accent_press}, stop:0.05 {p.surface_alt}, stop:1 {p.surface_alt});
+    border-left: 3px solid {p.accent};
+    padding-left: {m.pad_sm}px;
     color: {p.accent};
     font-weight: 600;
 }}
@@ -165,7 +218,8 @@ QPushButton#NavButton:checked {{
 /* --- Cartes et panneaux --- */
 
 QFrame#Card {{
-    background: {p.surface};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 {p.surface_alt}, stop:0.12 {p.surface}, stop:1 {p.surface});
     border: 1px solid {p.border};
     border-radius: {m.radius}px;
 }}
@@ -194,7 +248,7 @@ QPushButton {{
     border: 1px solid {p.border};
     border-radius: {m.radius_sm}px;
     color: {p.text};
-    padding: 7px 14px;
+    padding: 9px 16px;
 }}
 QPushButton:hover  {{ border-color: {p.accent}; }}
 QPushButton:pressed {{ background: {p.bg}; }}
@@ -205,7 +259,7 @@ QPushButton#Primary {{
     border: 1px solid {p.accent};
     color: {p.accent_text};
     font-weight: 600;
-    padding: 9px 18px;
+    padding: 11px 20px;
 }}
 QPushButton#Primary:hover   {{ background: {p.accent_hover}; border-color: {p.accent_hover}; }}
 QPushButton#Primary:pressed {{ background: {p.accent_press}; }}
@@ -238,7 +292,7 @@ QHeaderView::section {{
     padding: 7px {m.pad_sm}px;
     font-weight: 600;
 }}
-QTableView::item {{ padding: 4px {m.pad_sm}px; }}
+QTableView::item {{ padding: 7px {m.pad_sm}px; }}
 
 /* --- Champs --- */
 
@@ -246,7 +300,7 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {{
     background: {p.bg};
     border: 1px solid {p.border};
     border-radius: {m.radius_sm}px;
-    padding: 6px {m.pad_sm}px;
+    padding: 9px {m.pad_sm}px;
     color: {p.text};
     selection-background-color: {p.accent_press};
 }}

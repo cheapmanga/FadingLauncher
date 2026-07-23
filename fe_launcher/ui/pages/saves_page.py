@@ -41,15 +41,44 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QDoubleSpinBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QToolButton,
-    QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QSpinBox,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from ...core import savelib as savelib_mod
 from ...core import saves as saves_mod
 from ..main_window import Page
 from ..theme import METRICS, PALETTE
-from ..widgets import Badge, Card, PageHeader, separator
+from ..widgets import Badge, Card, FlowLayout, PageHeader, separator
+
+
+class _FlowContainer(QWidget):
+    """Conteneur d'une grille FlowLayout, qui déclare sa hauteur-selon-largeur.
+
+    Sans ça, dans une page défilante, le conteneur ne connaît pas sa hauteur avant que
+    le FlowLayout n'ait replié les cartes : il s'effondre à zéro ou déborde. On force le
+    widget à demander sa hauteur à son layout pour la largeur qu'on lui donne.
+    """
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        # Horizontalement expansif : le conteneur DOIT remplir la largeur de la carte,
+        # sinon il se rétracte à la taille d'une seule tuile et la grille n'a qu'une
+        # colonne quelle que soit la fenêtre. Verticalement il suit sa hauteur-selon-
+        # largeur.
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+        # Transparent : sinon la règle QSS globale `QWidget` lui peint le fond de la
+        # FENÊTRE (très sombre) en un rectangle visible par-dessus la carte claire.
+        self.setStyleSheet("background:transparent;")
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 — API Qt
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        lay = self.layout()
+        return lay.heightForWidth(width) if lay is not None else super().heightForWidth(width)
 
 #: Où l'on note le dossier désigné à la main. Il ne va PAS dans `Settings` : c'est un
 #: chemin de travail propre à cette page, et l'ajouter aux préférences partagées
@@ -852,44 +881,64 @@ class SavesPage(Page):
             self.library_card.body.addWidget(empty)
             return
 
+        # Grille de cartes RESPONSIVE : un conteneur à FlowLayout qui repasse les cartes à
+        # la ligne selon la largeur. Fenêtre large → plusieurs cartes de front ; fenêtre
+        # étroite → elles s'empilent. Aucune colonne codée en dur.
         enabled = root is not None and root.is_dir()
-        for save in saves:
-            self.library_card.body.addWidget(self._bundled_row(save, enabled=enabled))
+        grid_holder = _FlowContainer()
+        flow = FlowLayout(grid_holder, spacing=METRICS.pad)
+        for i, save in enumerate(saves):
+            flow.addWidget(self._bundled_card(save, index=i, enabled=enabled))
+        self.library_card.body.addWidget(grid_holder)
 
-    def _bundled_row(self, save, *, enabled: bool) -> QWidget:
-        # Une ligne = une carte légère (fond alterné + coins arrondis) plutôt qu'un bloc
-        # séparé par un trait. Les 15 saves se lisent alors comme une liste aérée, pas
-        # comme un registre.
+    def _bundled_card(self, save, *, index: int, enabled: bool) -> QWidget:
+        # Une carte à largeur fixe (le FlowLayout gère le retour à la ligne), coiffée d'un
+        # liseré coloré emprunté aux cores du jeu : chaque save a sa touche d'élément, et
+        # la grille cesse d'être un mur gris.
+        accent = PALETTE.elements[index % len(PALETTE.elements)]
         holder = QFrame()
-        holder.setObjectName("SaveRow")
+        holder.setObjectName("SaveCard")
+        holder.setFixedSize(236, 170)  # taille uniforme : une vraie galerie, pas des blocs
         holder.setStyleSheet(
-            f"#SaveRow {{ background:{PALETTE.surface_alt}; "
-            f"border-radius:{METRICS.radius_sm}px; }}")
+            f"#SaveCard {{ background:{PALETTE.surface_alt};"
+            f" border:1px solid {PALETTE.border};"
+            f" border-top:2px solid {accent};"
+            f" border-radius:{METRICS.radius}px; }}"
+            f"#SaveCard:hover {{ border-color:{accent}; }}")
         col = QVBoxLayout(holder)
-        col.setContentsMargins(METRICS.pad, METRICS.pad_sm, METRICS.pad_sm, METRICS.pad_sm)
-        col.setSpacing(2)
+        col.setContentsMargins(METRICS.pad, METRICS.pad_sm, METRICS.pad, METRICS.pad)
+        col.setSpacing(METRICS.pad_sm)
 
         top = QHBoxLayout()
         top.setSpacing(METRICS.pad_sm)
         name = QLabel(save.name)
         name.setObjectName("SectionTitle")
-        top.addWidget(name)
+        name.setWordWrap(True)
+        top.addWidget(name, 1)
         if not save.complete:
-            top.addWidget(Badge("INCOMPLÈTE", "warn"))
-        top.addStretch(1)
-        load = QPushButton("Charger")
-        load.setEnabled(enabled and save.complete)
-        load.clicked.connect(lambda _=False, s=save: self._load_bundled(s))
-        top.addWidget(load)
+            top.addWidget(Badge("!", "warn"), 0)
         top_holder = QWidget()
+        top_holder.setStyleSheet("background:transparent;")  # pas de boîte sombre sur la carte
         top_holder.setLayout(top)
         col.addWidget(top_holder)
 
         if save.progress:
-            progress = QLabel(save.progress)
+            # Résumé court sur la carte (2 stats), détail complet en infobulle : le
+            # stat-dump entier ne tient pas dans une tuile sans la faire déborder.
+            parts = [p.strip() for p in save.progress.split("·")]
+            short = " · ".join(parts[:2]) + (" …" if len(parts) > 2 else "")
+            progress = QLabel(short)
             progress.setObjectName("Dim")
             progress.setWordWrap(True)
-            col.addWidget(progress)
+            progress.setToolTip(save.progress.replace(" · ", "\n"))
+            col.addWidget(progress, 1)
+
+        col.addStretch(1)
+        load = QPushButton("Charger")
+        load.setObjectName("Primary")
+        load.setEnabled(enabled and save.complete)
+        load.clicked.connect(lambda _=False, s=save: self._load_bundled(s))
+        col.addWidget(load)
         return holder
 
     def _load_bundled(self, save) -> None:

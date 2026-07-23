@@ -16,6 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
     QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from ..core import doctor, logs, ue4ss_setup
+from ..core import doctor, logs, portraits, ue4ss_setup
 from ..core.doctor import Level
 from ..core.launch import LaunchMode, is_running, launch
 from ..core.logs import LogReport
@@ -54,6 +55,32 @@ def _install_label(inst: GameInstall) -> str:
     return f"{inst.name} — {_EDITION_LABEL.get(inst.edition, _EDITION_LABEL[Edition.UNKNOWN])}"
 
 _LEVEL_KIND = {Level.OK: "ok", Level.WARN: "warn", Level.ERROR: "error"}
+
+_BRAND_SIZE = 34
+
+
+def _brand_avatar() -> QLabel | None:
+    """Vignette ronde de l'avatar de One pour la bannière, ou None si l'asset manque.
+
+    L'image vient du jeu (`HUD_Avatar_One_Shard.png`) : elle ancre le launcher dans
+    Fading Echo. Absente (build sans portraits), on renvoie None et la bannière tient
+    sans elle — jamais de carré vide.
+    """
+    path = portraits.RESOURCES / "HUD_Avatar_One_Shard.png"
+    if not path.is_file():
+        return None
+    pix = QPixmap(str(path))
+    if pix.isNull():
+        return None
+    lbl = QLabel()
+    lbl.setFixedSize(_BRAND_SIZE, _BRAND_SIZE)
+    lbl.setScaledContents(True)
+    lbl.setPixmap(pix.scaled(_BRAND_SIZE, _BRAND_SIZE, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                             Qt.TransformationMode.SmoothTransformation))
+    lbl.setStyleSheet(
+        f"border:1px solid {PALETTE.border_glow}; border-radius:{_BRAND_SIZE // 2}px;"
+        f"background:{PALETTE.surface_alt};")
+    return lbl
 
 
 def scrollable(widget: QWidget) -> QScrollArea:
@@ -868,9 +895,29 @@ class MainWindow(QWidget):
         layout.setContentsMargins(0, 0, 0, METRICS.pad)
         layout.setSpacing(0)
 
-        brand = QLabel("Fading Echo")
-        brand.setObjectName("SidebarBrand")
-        layout.addWidget(brand)
+        # Marque : l'avatar de One (image du jeu) posé à côté du nom, pour ancrer le
+        # launcher dans l'univers de Fading Echo dès le premier coup d'œil.
+        brand_row = QWidget()
+        brow = QHBoxLayout(brand_row)
+        brow.setContentsMargins(METRICS.pad, METRICS.pad, METRICS.pad, 0)
+        brow.setSpacing(METRICS.pad_sm)
+        avatar = _brand_avatar()
+        if avatar is not None:
+            brow.addWidget(avatar, 0)
+        wordmark = QLabel("FADING ECHO")
+        wordmark.setObjectName("SidebarBrand")
+        wordmark.setContentsMargins(0, 0, 0, 0)
+        brow.addWidget(wordmark, 1)
+        layout.addWidget(brand_row)
+
+        sub = QLabel("SPEEDRUN LAUNCHER")
+        sub.setObjectName("SidebarBrandSub")
+        layout.addWidget(sub)
+
+        # Liseré des cinq cores : l'identité chromatique du jeu en une bande.
+        art = QLabel()
+        art.setObjectName("SidebarArt")
+        layout.addWidget(art)
 
         version = QLabel(f"Launcher {__version__}")
         version.setObjectName("SidebarVersion")
