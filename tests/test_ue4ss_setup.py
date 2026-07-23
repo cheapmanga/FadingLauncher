@@ -93,3 +93,70 @@ def test_run_telecharge_si_pas_de_zip(tmp_path, monkeypatch):
     rep = ue4ss_setup.run(inst, led, probe=lambda: False)
     assert any("Téléchargement" in s.label for s in rep.steps)
     assert paths.inspect(tmp_path / "steamapps" / "common" / "Project Ygro").has_ue4ss
+
+
+# --- Réinstallation par-dessus une install qui contient déjà des mods ---------------
+#
+# Régression vécue en jeu (log UE4SS à l'appui) : réinstaller UE4SS supprimait les
+# FICHIERS sous `ue4ss/` mais laissait les DOSSIERS. Chaque mod devenait une coquille
+# vide que `modinstall.is_installed` prenait encore pour installée — le bouton
+# « Installer les mods fournis » répondait « déjà installés » et ne reposait rien —
+# pendant qu'UE4SS, voyant un `enabled.txt` survivant, échouait sur
+# « Main script 'main.lua' not found ».
+
+def _installed_with_mods(tmp_path):
+    from fe_launcher.core import modinstall
+    inst = _install_no_ue4ss(tmp_path)
+    led = Ledger(tmp_path / "led")
+    assert ue4ss_setup.install_from_bundle(inst, led, ue4ss_setup.SetupReport(True))
+    inst = paths.inspect(inst.root)
+    modinstall.install_all(inst.ue4ss, led)
+    return inst, led
+
+
+@pytest.mark.skipif(not ue4ss_setup.has_bundle(), reason="bundle UE4SS absent")
+def test_reinstall_conserve_les_mods_installes(tmp_path):
+    from fe_launcher.core import modinstall
+    inst, led = _installed_with_mods(tmp_path)
+    avant = [m.name for m in modinstall.bundled_mods()
+             if modinstall.is_installed(inst.ue4ss, m.name)]
+    assert avant, "la fixture doit contenir des mods installés"
+
+    assert ue4ss_setup.install_from_bundle(inst, led, ue4ss_setup.SetupReport(True),
+                                           replace=True)
+
+    for name in avant:
+        d = inst.ue4ss.mods_dir / name
+        assert (d / "Scripts" / "main.lua").is_file(), \
+            f"{name} a perdu son script lors de la réinstallation d'UE4SS"
+        assert modinstall.is_installed(inst.ue4ss, name)
+
+
+@pytest.mark.skipif(not ue4ss_setup.has_bundle(), reason="bundle UE4SS absent")
+def test_reinstall_ne_laisse_aucun_dossier_vide(tmp_path):
+    inst, led = _installed_with_mods(tmp_path)
+    ue4ss_setup.install_from_bundle(inst, led, ue4ss_setup.SetupReport(True), replace=True)
+
+    vides = [str(d.relative_to(inst.ue4ss.root))
+             for d in inst.ue4ss.root.rglob("*")
+             if d.is_dir() and not any(d.iterdir())]
+    assert not vides, f"dossiers vides laissés par la réinstallation : {vides}"
+
+
+def test_dossier_vide_n_est_pas_un_mod_installe(tmp_path):
+    """Une coquille vide ne doit jamais compter comme installée."""
+    from fe_launcher.core import modinstall
+    make_fixture.build_install(tmp_path / "common", full=True, with_ue4ss=True)
+    layout = paths.inspect(tmp_path / "common" / "Project Ygrό").ue4ss
+    assert layout is not None
+
+    sain = layout.mods_dir / "ue4ss-FEMoonJump"
+    (sain / "Scripts").mkdir(parents=True, exist_ok=True)
+    (sain / "Scripts" / "main.lua").write_text("-- ok", encoding="utf-8")
+    assert modinstall.is_installed(layout, "ue4ss-FEMoonJump")
+
+    ghost = layout.mods_dir / "ue4ss-FECoreGiver"
+    (ghost / "Scripts").mkdir(parents=True)
+    (ghost / "enabled.txt").write_bytes(b"")
+    assert not modinstall.is_installed(layout, "ue4ss-FECoreGiver"), \
+        "un dossier sans script ne doit pas bloquer la réinstallation du mod"

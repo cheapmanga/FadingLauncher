@@ -482,31 +482,33 @@ def _check_uehelpers(install: GameInstall, mods: list[Mod]) -> Diagnosis:
 def _check_broken_cpp(mods: list[Mod]) -> Diagnosis:
     broken = [m for m in mods if m.state is ModState.BROKEN]
     if not broken:
-        cpp = [m for m in mods if m.kind is ModKind.CPP]
         return Diagnosis(
             code="mods.cpp_ok",
             level=Level.OK,
-            title="Aucun mod C++ activé sans DLL",
-            detail=f"{len(cpp)} mod(s) C++ détecté(s).",
-            why="Un mod C++ ne fait rien tant que dlls/main.dll n'a pas été compilé.",
+            title="Aucun mod activé sans contenu",
+            detail=f"{len(mods)} mod(s) détecté(s), tous exécutables.",
+            why="Un mod activé dont le script ou la DLL manque échoue au chargement.",
         )
 
-    listing = "\n".join(f"  • {m.name} — attendu : {m.path / 'dlls' / 'main.dll'}"
-                        for m in broken)
+    listing = "\n".join(f"  • {m.name} — {m.path}" for m in broken)
     return Diagnosis(
         code="mods.cpp_not_compiled",
         level=Level.WARN,
-        title=f"{len(broken)} mod(s) C++ activé(s) mais jamais compilé(s)",
+        title=f"{len(broken)} mod(s) activé(s) mais sans contenu exécutable",
         detail=listing,
         why=(
-            "Ces mods ont un enabled.txt, donc UE4SS les considère comme actifs et tente "
-            "de les démarrer, mais leur dlls/main.dll n'existe pas. Ils apparaissent dans "
-            "la liste des mods, ne font rien, et polluent le log de démarrage. Tant qu'ils "
-            "ne sont pas compilés, les laisser activés n'apporte rien."
+            "Ces dossiers ont un enabled.txt, donc UE4SS les considère comme actifs et "
+            "tente de les démarrer, mais il n'y a ni Scripts/main.lua ni dlls/main.dll à "
+            "exécuter. UE4SS répond « Main script 'main.lua' not found » et passe au "
+            "suivant. Ils occupent la liste, ne font rien, et polluent le log. Cela "
+            "arrive quand un dossier de mod a été vidé — par une réinstallation d'UE4SS "
+            "par-dessus, ou une suppression à la main. Reposer les mods fournis les "
+            "réparera ; les désactiver nettoiera le log."
         ),
         fix_label="Désactiver ces mods (réversible)",
         fix=lambda: _disable_all(broken),
-        doc="Compiler ces mods demande la chaîne de build C++ d'UE4SS (xmake + MSVC).",
+        doc="Pour les réparer plutôt que les désactiver : page Mods → « Installer les "
+            "mods fournis ».",
     )
 
 

@@ -49,6 +49,46 @@ def has_bundle() -> bool:
     return (b / "dwmapi.dll").is_file() and (b / "ue4ss" / "UE4SS-settings.ini").is_file()
 
 
+def _foreign_mods(installed_mods: Path, bundle_mods: Path) -> set[str]:
+    """Noms des dossiers de `Mods/` qui ne viennent PAS du build de référence.
+
+    Réinstaller UE4SS ne doit pas emporter les mods que l'utilisateur a installés :
+    ce sont deux choses distinctes dans l'interface (le bouton UE4SS et la case des
+    mods), et les voir disparaître sans l'avoir demandé est une mauvaise surprise.
+    Tout ce que le bundle ne fournit pas est donc préservé tel quel.
+    """
+    if not installed_mods.is_dir():
+        return set()
+    from_bundle = {d.name for d in bundle_mods.iterdir()} if bundle_mods.is_dir() else set()
+    return {d.name for d in installed_mods.iterdir()
+            if d.is_dir() and d.name not in from_bundle}
+
+
+def _is_kept(f: Path, ue4ss_root: Path, kept: set[str]) -> bool:
+    """Vrai si `f` appartient à un dossier de mod à préserver."""
+    if not kept:
+        return False
+    try:
+        rel = f.relative_to(ue4ss_root)
+    except ValueError:
+        return False
+    return len(rel.parts) >= 2 and rel.parts[0] == "Mods" and rel.parts[1] in kept
+
+
+def _prune_empty_dirs(root: Path) -> None:
+    """Supprime les dossiers vides sous `root`, du plus profond vers la racine.
+
+    Pas de journalisation : un dossier vide n'a aucun contenu à restaurer, et
+    l'annulation des fichiers qu'il contenait recrée son arborescence au besoin.
+    """
+    for d in sorted((p for p in root.rglob("*") if p.is_dir()),
+                    key=lambda p: len(p.parts), reverse=True):
+        try:
+            d.rmdir()  # ne réussit que s'il est vide
+        except OSError:
+            pass
+
+
 def install_from_bundle(install: GameInstall, ledger: Ledger, report: SetupReport,
                         *, replace: bool = False) -> bool:
     """Installe le build UE4SS embarqué dans le jeu, structure NESTED exacte.
@@ -83,20 +123,30 @@ def install_from_bundle(install: GameInstall, ledger: Ledger, report: SetupRepor
         # rapport rouge. On rend l'échec propre, avec le conseil qui va bien.
         try:
             removed = 0
+            kept = _foreign_mods(win64 / "ue4ss" / "Mods", src / "ue4ss" / "Mods")
             for old in (win64 / "ue4ss", win64 / "dwmapi.dll"):
                 if old.is_dir():
                     for f in sorted(old.rglob("*"), reverse=True):
-                        if f.is_file():
+                        if f.is_file() and not _is_kept(f, old, kept):
                             ledger.delete_file(f, label=f"ancien UE4SS : {f.name}",
                                                group=LEDGER_GROUP)
                             removed += 1
+                    # Supprimer les FICHIERS laisse l'arborescence de dossiers debout.
+                    # Un `Mods/ue4ss-FECoreGiver/` vidé de son script reste un dossier :
+                    # `modinstall.is_installed` le voyait comme installé et refusait de
+                    # le reposer, et si son `enabled.txt` survivait, UE4SS le démarrait
+                    # puis échouait sur « main.lua not found ». On balaie donc les
+                    # dossiers devenus vides, du plus profond vers la racine.
+                    _prune_empty_dirs(old)
                 elif old.is_file():
                     ledger.delete_file(old, label=f"ancien UE4SS : {old.name}",
                                        group=LEDGER_GROUP)
                     removed += 1
             if removed:
-                report.add("Ancien UE4SS retiré", True,
-                           f"{removed} fichier(s) supprimé(s) avant réécriture propre.")
+                detail = f"{removed} fichier(s) supprimé(s) avant réécriture propre."
+                if kept:
+                    detail += f" {len(kept)} mod(s) installé(s) conservé(s)."
+                report.add("Ancien UE4SS retiré", True, detail)
         except OSError as exc:
             report.add("Suppression de l'ancien UE4SS", False,
                        f"{exc} — fermez complètement le jeu et Steam, puis réessayez.")

@@ -221,9 +221,13 @@ def load(layout: Ue4ssLayout) -> list[Mod]:
         declared_on = declared.get(entry.name) is True
         if not (marker_present or declared_on):
             state = ModState.DISABLED
-        elif kind is ModKind.CPP and not has_dll:
-            # Cas réel : 3 mods C++ du projet n'ont jamais été compilés. Ils ont un
-            # enabled.txt, donc UE4SS tente de les charger, mais il n'y a pas de DLL.
+        elif kind is ModKind.UNKNOWN or (kind is ModKind.CPP and not has_dll):
+            # Le dossier est activé mais n'a rien à exécuter : ni script, ni DLL. Cas
+            # réel rencontré en jeu — une réinstallation d'UE4SS par-dessus avait vidé
+            # `ue4ss-FECoreGiver/` en laissant son `enabled.txt`, et UE4SS répondait
+            # « Main script 'main.lua' not found ». Sans ce cas, le launcher affichait
+            # le mod comme ACTIF pendant qu'il échouait au chargement : le pire des
+            # états, puisqu'il donne confiance dans quelque chose qui ne marche pas.
             state = ModState.BROKEN
         else:
             state = ModState.ENABLED

@@ -154,7 +154,7 @@ def test_bench_verdict_reports_no_winner_on_noise(qapp, tmp_path):
 
 
 def test_broken_cpp_mod_is_flagged(qapp, tmp_path):
-    """Un mod C++ activé sans DLL compilée porte l'état BROKEN (badge « NON COMPILÉ »)."""
+    """Un mod C++ activé sans DLL compilée porte l'état BROKEN (badge « INCOMPLET »)."""
     inst = make_install(tmp_path / "lib",
                         mod_names=["ue4ss-FEMoonJump"])  # un mod lua sain à côté
     # mod C++ non compilé : dossier dlls/ + dllmain.cpp, sans main.dll, marqué actif.
@@ -168,8 +168,26 @@ def test_broken_cpp_mod_is_flagged(qapp, tmp_path):
     assert broken and broken[0].state is ModState.BROKEN
 
     page = ModsPage(ctx)
-    # La page distingue les non compilés dans son compteur.
-    assert "non compilé" in page.count_label.text().lower()
+    # La page distingue les mods sans contenu exécutable dans son compteur.
+    assert "incomplet" in page.count_label.text().lower()
+
+
+def test_emptied_mod_folder_is_broken_not_enabled(qapp, tmp_path):
+    """Un dossier de mod vidé de son script est INCOMPLET, jamais annoncé actif.
+
+    Régression vécue en jeu : réinstaller UE4SS par-dessus avait vidé
+    `ue4ss-FECoreGiver/` en laissant son `enabled.txt`. UE4SS répondait « Main script
+    'main.lua' not found » pendant que le launcher affichait le mod comme ACTIF.
+    """
+    inst = make_install(tmp_path / "lib", mod_names=["ue4ss-FEMoonJump"])
+    ghost = inst.ue4ss.mods_dir / "ue4ss-FECoreGiver"
+    (ghost / "Scripts").mkdir(parents=True)   # dossier présent, main.lua absent
+    (ghost / "enabled.txt").write_bytes(b"")
+
+    ctx = _ctx(tmp_path, inst)
+    mod = next(m for m in ctx.mods if m.name == "ue4ss-FECoreGiver")
+    assert mod.state is ModState.BROKEN, "un dossier sans script ne doit pas passer actif"
+    assert mod not in ctx.enabled_mods
 
 
 def test_bundled_library_lists_fifteen_saves(qapp, tmp_path):

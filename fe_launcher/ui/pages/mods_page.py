@@ -53,7 +53,7 @@ from ..widgets import Badge, Card, ModDocPanel, PageHeader, build_editors, separ
 _STATE_BADGE = {
     ModState.ENABLED: ("ACTIF", "ok"),
     ModState.DISABLED: ("INACTIF", "muted"),
-    ModState.BROKEN: ("NON COMPILÉ", "error"),
+    ModState.BROKEN: ("INCOMPLET", "error"),
 }
 
 
@@ -119,8 +119,10 @@ class ModRow(QFrame):
             root.addLayout(self._conflict_row(conflicts))
 
         if mod.state is ModState.BROKEN:
-            warn = QLabel("Aucune bibliothèque compilée : cocher ce mod n'aura aucun "
-                          "effet en jeu tant qu'il n'est pas construit.")
+            warn = QLabel(
+                "Ce dossier est activé mais ne contient rien à exécuter : ni script "
+                "Lua, ni bibliothèque. UE4SS essaie de le charger et échoue.\n"
+                "Utilisez « Installer les mods fournis » pour le reposer proprement.")
             warn.setWordWrap(True)
             warn.setStyleSheet(f"color:{PALETTE.warn};")
             root.addWidget(warn)
@@ -310,7 +312,7 @@ class ModsPage(Page):
                          if m.state is ModState.BROKEN)
             text = f"{active} actif(s) sur {total}"
             if broken:
-                text += f"   ·   {broken} non compilé(s), sans effet"
+                text += f"   ·   {broken} incomplet(s), sans effet"
             self.count_label.setText(text)
 
         if not visible:

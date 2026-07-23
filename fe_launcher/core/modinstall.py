@@ -86,7 +86,19 @@ def bundled_mod(name: str) -> BundledMod | None:
 
 
 def is_installed(layout: Ue4ssLayout, name: str) -> bool:
-    return (layout.mods_dir / name).is_dir()
+    """Vrai si le mod est présent ET utilisable.
+
+    Le seul test « le dossier existe » ne suffit pas : un dossier vidé de son script
+    (réinstallation d'UE4SS par-dessus, annulation partielle, suppression à la main)
+    passait pour installé. Résultat, le bouton d'installation répondait « tous les
+    mods sont déjà installés » et ne reposait rien, pendant qu'UE4SS démarrait le
+    dossier à cause de son `enabled.txt` et échouait sur « main.lua not found ».
+    On exige donc la charge utile : le script Lua, ou une DLL pour les mods C++.
+    """
+    d = layout.mods_dir / name
+    if not d.is_dir():
+        return False
+    return (d / "Scripts" / "main.lua").is_file() or any(d.rglob("*.dll"))
 
 
 @dataclass

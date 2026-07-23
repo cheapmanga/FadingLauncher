@@ -374,6 +374,13 @@ class Ue4ssSetupDialog(QDialog):
         # à recommencer une opération déjà faite ; on le transforme en « Fermer » pour que
         # le geste évident (sortir) soit celui qui reste en avant.
         if report.ok:
+            # La question qui suit systématiquement une install réussie est « et
+            # maintenant, où est la fenêtre UE4SS ? ». Elle ne s'ouvre pas seule : il
+            # faut la demander en jeu. Le dire ici évite de la croire absente.
+            report.add("En jeu", True,
+                       "Ctrl+O ouvre la console UE4SS, F10 la console du jeu "
+                       "(pour taper les commandes des mods).")
+            self._render_report(report)
             self.run_btn.setText("Fermer")
             try:
                 self.run_btn.clicked.disconnect(self._run)
