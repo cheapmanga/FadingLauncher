@@ -107,6 +107,26 @@ PALETTE = Palette()
 METRICS = Metrics()
 
 
+def rgba(hex_color: str, alpha: int) -> str:
+    """`"#33cfe0", 40` -> `"rgba(51, 207, 224, 40)"` — pour des fonds teintés translucides."""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def element_button_qss(hex_color: str) -> str:
+    """Feuille de style d'un bouton plein dans la couleur d'un core élémentaire.
+
+    Colorer les boutons « Charger » de chaque carte, pas juste un liseré : c'est ce qui
+    rend la grille VIVE. Le texte reste sombre pour tenir sur une couleur lumineuse.
+    """
+    return (
+        f"QPushButton {{ background: {hex_color}; color: #04181d; border: none;"
+        f" border-radius: {METRICS.radius_sm}px; padding: 9px 16px; font-weight: 600; }}"
+        f"QPushButton:hover {{ background: {rgba(hex_color, 230)}; }}"
+        f"QPushButton:disabled {{ background: {rgba(hex_color, 70)}; color: {rgba(hex_color, 130)}; }}")
+
+
 # --- Vérification de contraste (testable) ---------------------------------------
 
 def _srgb_to_linear(c: float) -> float:

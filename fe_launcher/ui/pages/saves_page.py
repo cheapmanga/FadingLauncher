@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 from ...core import savelib as savelib_mod
 from ...core import saves as saves_mod
 from ..main_window import Page
-from ..theme import METRICS, PALETTE
+from ..theme import METRICS, PALETTE, element_button_qss, rgba
 from ..widgets import Badge, Card, FlowLayout, PageHeader, separator
 
 
@@ -897,16 +897,21 @@ class SavesPage(Page):
         # Une carte à largeur fixe (le FlowLayout gère le retour à la ligne), coiffée d'un
         # liseré coloré emprunté aux cores du jeu : chaque save a sa touche d'élément, et
         # la grille cesse d'être un mur gris.
+        # Chaque carte est TEINTÉE dans la couleur d'un core : fond dégradé dans sa
+        # teinte, bordure colorée, nom coloré, bouton plein de la même couleur. La grille
+        # devient un arc-en-ciel des cinq éléments au lieu d'un mur gris à liserés.
         accent = PALETTE.elements[index % len(PALETTE.elements)]
         holder = QFrame()
         holder.setObjectName("SaveCard")
-        holder.setFixedSize(236, 170)  # taille uniforme : une vraie galerie, pas des blocs
+        holder.setFixedSize(240, 176)  # taille uniforme : une vraie galerie
         holder.setStyleSheet(
-            f"#SaveCard {{ background:{PALETTE.surface_alt};"
-            f" border:1px solid {PALETTE.border};"
-            f" border-top:2px solid {accent};"
+            f"#SaveCard {{ background: qlineargradient(x1:0, y1:0, x2:0.4, y2:1,"
+            f" stop:0 {rgba(accent, 55)}, stop:0.55 {PALETTE.surface_alt},"
+            f" stop:1 {PALETTE.surface}); "
+            f" border:1px solid {rgba(accent, 120)};"
+            f" border-top:3px solid {accent};"
             f" border-radius:{METRICS.radius}px; }}"
-            f"#SaveCard:hover {{ border-color:{accent}; }}")
+            f"#SaveCard:hover {{ border:1px solid {accent}; border-top:3px solid {accent}; }}")
         col = QVBoxLayout(holder)
         col.setContentsMargins(METRICS.pad, METRICS.pad_sm, METRICS.pad, METRICS.pad)
         col.setSpacing(METRICS.pad_sm)
@@ -914,8 +919,9 @@ class SavesPage(Page):
         top = QHBoxLayout()
         top.setSpacing(METRICS.pad_sm)
         name = QLabel(save.name)
-        name.setObjectName("SectionTitle")
         name.setWordWrap(True)
+        name.setStyleSheet(
+            f"background:transparent; color:{accent}; font-size:14px; font-weight:700;")
         top.addWidget(name, 1)
         if not save.complete:
             top.addWidget(Badge("!", "warn"), 0)
@@ -932,14 +938,15 @@ class SavesPage(Page):
             parts = [p.strip() for p in save.progress.split("·")]
             short = " · ".join(parts[:2]) + (" …" if len(parts) > 2 else "")
             progress = QLabel(short)
-            progress.setObjectName("Dim")
             progress.setWordWrap(True)
+            progress.setStyleSheet(f"background:transparent; color:{PALETTE.text_dim};")
             progress.setToolTip(save.progress.replace(" · ", "\n"))
             col.addWidget(progress, 1)
 
         col.addStretch(1)
         load = QPushButton("Charger")
-        load.setObjectName("Primary")
+        # Bouton plein dans la couleur du core (pas juste un liseré) — c'est la couleur.
+        load.setStyleSheet(element_button_qss(accent))
         load.setEnabled(enabled and save.complete)
         load.clicked.connect(lambda _=False, s=save: self._load_bundled(s))
         col.addWidget(load)
