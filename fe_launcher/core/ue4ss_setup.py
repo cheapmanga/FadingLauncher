@@ -20,6 +20,7 @@ choisisse explicitement son fichier.
 from __future__ import annotations
 
 import json
+import sys
 import urllib.error
 import urllib.request
 import zipfile
@@ -183,7 +184,41 @@ def install_ue4ss(install: GameInstall, zip_path: Path, ledger: Ledger,
         return False
 
     report.add("UE4SS installé", True, f"extrait dans {win64.name}\\")
+    _deploy_signatures(win64, ledger, report)
     return True
+
+
+def _bundled_signatures_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "fe_launcher" / "resources" / "ue4ss_signatures"
+    return Path(__file__).resolve().parent.parent / "resources" / "ue4ss_signatures"
+
+
+def _deploy_signatures(win64: Path, ledger: Ledger, report: SetupReport) -> None:
+    """Dépose les signatures custom nécessaires à Fading Echo à côté d'UE4SS-settings.ini.
+
+    Pourquoi c'est indispensable : sur Fading Echo, le scan automatique d'UE4SS ne trouve
+    PAS `StaticConstructObject_Internal` (vérifié sur le log réel : il est résolu « <- Lua
+    Script », donc par une signature custom). Sans elle, tout mod qui fait apparaître un
+    objet — les cores, par exemple — échoue. Le zip standard d'UE4SS ne la contient pas.
+
+    UE4SS cherche ces fichiers dans `UE4SS_Signatures/` À CÔTÉ de son `UE4SS-settings.ini`.
+    On repère donc où le settings a atterri (à plat dans Win64, ou dans Win64/ue4ss) et on
+    dépose la signature là.
+    """
+    src = _bundled_signatures_dir()
+    if not src.is_dir():
+        return
+    # Où est UE4SS-settings.ini ? c'est le dossier de travail d'UE4SS.
+    for base in (win64 / "ue4ss", win64):
+        if (base / "UE4SS-settings.ini").is_file():
+            target_dir = base / "UE4SS_Signatures"
+            for sig in src.glob("*.lua"):
+                ledger.create_file(target_dir / sig.name, sig.read_bytes(),
+                                   label=f"signature UE4SS : {sig.name}", group=LEDGER_GROUP)
+            report.add("Signatures Fading Echo", True,
+                       "StaticConstructObject déployée (spawn d'objets).")
+            return
 
 
 def run(install: GameInstall, ledger: Ledger, *,
