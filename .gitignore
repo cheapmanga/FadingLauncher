@@ -1,0 +1,24 @@
+# Environnement Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Données locales du launcher (journal, sauvegardes, campagnes) — jamais versionnées
+*.corrupt
+*.corrupt.*
+
+# Scratchpad / sorties de test
+/tmp/
+*.log
+scratchpad/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Les portraits sont extraits par l'utilisateur depuis le jeu (droits Ygro/Fishing Cactus).
+# On versionne le dossier mais pas les images elles-mêmes — voir resources/portraits/README.
+fe_launcher/resources/portraits/*.png
+fe_launcher/resources/portraits/*.jpg
