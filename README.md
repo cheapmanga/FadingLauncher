@@ -35,6 +35,20 @@ gagnant tant que l'écart n'est pas significatif.
 
 ---
 
+## Tout est fourni
+
+Le launcher embarque de quoi partir de zéro, sans chercher un seul fichier :
+
+- **UE4SS + correctif du chemin grec** en un bouton (vous fournissez le .zip d'UE4SS).
+- **17 mods** prêts à installer, avec leur dépendance UEHelpers.
+- **15 sauvegardes** à différents points de progression, chargeables en un clic.
+- **Prévisualisation des skins** avec les portraits du jeu.
+- **Éditeur de sauvegarde** graphique (booléens et compteurs), le code brut derrière un
+  bandeau « Avancé ».
+
+Tout ce que le launcher installe passe par son journal : réversible, et la désinstallation
+ne défait que ça.
+
 ## Ce que le launcher garantit
 
 **Tout est réversible.** Chaque écriture est consignée dans un journal (`core/ledger.py`)
@@ -50,10 +64,11 @@ Steam et édite un manifeste : il ne s'exécute que si Steam est prouvé fermé.
 Steam est *inconnu* (sonde indisponible), c'est traité comme un refus, jamais comme un
 feu vert.
 
-**Aucune édition de sauvegarde.** Le format GVAS de ce jeu est lisible et réécrivable à
+**Édition de sauvegarde limitée à ce qui est sûr.** Le format GVAS de ce jeu se réécrit à
 l'octet près, mais son cadrage inter-objets n'est pas rétro-conçu : modifier une chaîne ou
-un tableau casse le fichier silencieusement. Le launcher ne fait donc que copier et
-restaurer des fichiers entiers.
+un tableau casserait le fichier silencieusement. L'éditeur n'expose donc QUE les champs à
+largeur fixe — booléens et compteurs — dont l'aller-retour est garanti exact. Tout le
+reste est lu mais jamais proposé à l'écriture.
 
 ---
 

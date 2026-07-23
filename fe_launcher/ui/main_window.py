@@ -23,14 +23,35 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from ..core import doctor, logs
+from ..core import doctor, logs, ue4ss_setup
 from ..core.doctor import Level
 from ..core.launch import LaunchMode, is_running, launch
 from ..core.logs import LogReport
 from ..core.mods import ModState
+from ..core.paths import Edition, GameInstall
+from ..core.ue4ss_setup import SetupReport, looks_like_ue4ss_zip
 from .context import AppContext
 from .theme import METRICS, PALETTE
-from .widgets import Badge, Card, PageHeader, separator
+from .widgets import Badge, Card, ComboBox, PageHeader, separator
+
+# Libellés utilisateur des éditions. Isolé ici parce qu'il sert à deux endroits (le badge
+# de la carte install et le libellé du sélecteur d'installation) et qu'un jeu complet
+# affiché « DEMO » enverrait l'utilisateur chercher un problème inexistant.
+_EDITION_LABEL = {
+    Edition.DEMO: "Démo",
+    Edition.FULL: "Jeu complet",
+    Edition.UNKNOWN: "Édition inconnue",
+}
+
+
+def _install_label(inst: GameInstall) -> str:
+    """« Project Ygrό — Jeu complet » : nom du dossier + édition en clair.
+
+    Le nom seul ne suffit pas à choisir entre deux installs (démo et complète portent
+    des dossiers différents mais l'utilisateur ne les distingue pas de tête) ; l'édition
+    seule non plus si les deux sont du même type. On donne les deux.
+    """
+    return f"{inst.name} — {_EDITION_LABEL.get(inst.edition, _EDITION_LABEL[Edition.UNKNOWN])}"
 
 _LEVEL_KIND = {Level.OK: "ok", Level.WARN: "warn", Level.ERROR: "error"}
 
@@ -190,6 +211,178 @@ class LogReviewDialog(QDialog):
         return lbl
 
 
+class Ue4ssSetupDialog(QDialog):
+    """Assistant « Installer UE4SS et corriger le jeu ».
+
+    Pourquoi ce dialogue existe
+    ---------------------------
+    Sur le jeu complet, deux problèmes se cumulent et rendent les mods muets : UE4SS peut
+    être absent, ET le dossier `Project Ygrό` porte un omicron grec qui tue UE4SS au
+    démarrage. Les deux se règlent en une passe (`ue4ss_setup.run`), mais l'opération
+    touche au disque et peut être REFUSÉE (Steam ouvert). On ne cache jamais ce refus : le
+    rapport étape par étape le montre tel quel, sinon l'utilisateur relancerait le jeu en
+    croyant le correctif appliqué.
+
+    Le .zip d'UE4SS est fourni par l'utilisateur (aucune URL n'est codée en dur : injecter
+    un binaire dans le jeu mérite un choix explicite). Il est OPTIONNEL : si UE4SS est déjà
+    là et qu'il ne reste que le chemin grec à corriger, on lance sans zip.
+    """
+
+    def __init__(self, ctx: AppContext, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.ctx = ctx
+        self._zip: Path | None = None
+        self.setWindowTitle("Installer UE4SS")
+        self.resize(600, 520)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(METRICS.pad_lg, METRICS.pad_lg,
+                                METRICS.pad_lg, METRICS.pad_lg)
+        root.setSpacing(METRICS.pad)
+
+        head = QLabel("Installer UE4SS et corriger le jeu")
+        head.setObjectName("SectionTitle")
+        head.setWordWrap(True)
+        root.addWidget(head)
+
+        intro = QLabel(
+            "Cette opération installe UE4SS (l'extension qui permet au jeu de charger les "
+            "mods) et corrige le dossier au caractère grec qui empêche UE4SS de démarrer.")
+        intro.setObjectName("Dim")
+        intro.setWordWrap(True)
+        root.addWidget(intro)
+
+        # Le correctif du chemin RENOMME le dossier du jeu : Steam doit être fermé, sinon
+        # il tient le dossier ouvert et le renommage est refusé. On le dit d'emblée plutôt
+        # que de laisser l'utilisateur le découvrir dans un rapport rouge.
+        note = QLabel("Le correctif du dossier exige que Steam soit entièrement fermé "
+                      "(icône de la barre des tâches → Quitter).")
+        note.setObjectName("Dim")
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        root.addWidget(separator())
+
+        # Choix du .zip d'UE4SS.
+        zip_row = QHBoxLayout()
+        self.zip_btn = QPushButton("Choisir le .zip d'UE4SS…")
+        self.zip_btn.clicked.connect(self._choose_zip)
+        zip_row.addWidget(self.zip_btn, 0)
+        self.zip_label = QLabel("Aucune archive choisie (facultatif si UE4SS est déjà là).")
+        self.zip_label.setObjectName("Dim")
+        self.zip_label.setWordWrap(True)
+        zip_row.addWidget(self.zip_label, 1)
+        zip_holder = QWidget()
+        zip_holder.setLayout(zip_row)
+        root.addWidget(zip_holder)
+
+        # Avertissement d'archive non reconnue, masqué tant qu'il n'y a rien à signaler.
+        self.zip_warning = QLabel()
+        self.zip_warning.setWordWrap(True)
+        self.zip_warning.setStyleSheet(f"color:{PALETTE.error};")
+        self.zip_warning.hide()
+        root.addWidget(self.zip_warning)
+
+        # Zone de rapport, remplie après le lancement.
+        self.report_holder = QWidget()
+        self.report_layout = QVBoxLayout(self.report_holder)
+        self.report_layout.setContentsMargins(0, 0, 0, 0)
+        self.report_layout.setSpacing(METRICS.pad_sm)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setWidget(self.report_holder)
+        root.addWidget(area, 1)
+
+        buttons = QHBoxLayout()
+        self.run_btn = QPushButton("Lancer l'installation")
+        self.run_btn.setObjectName("Primary")
+        self.run_btn.clicked.connect(self._run)
+        buttons.addWidget(self.run_btn, 0)
+        buttons.addStretch(1)
+        close = QPushButton("Fermer")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(close, 0)
+        root.addLayout(buttons)
+
+    def _choose_zip(self) -> None:
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, "Archive UE4SS", "", "Archives ZIP (*.zip)")
+        if not chosen:
+            return
+        self._set_zip(Path(chosen))
+
+    def _set_zip(self, path: Path) -> None:
+        """Enregistre le zip choisi et valide qu'il ressemble bien à UE4SS.
+
+        Séparé de `_choose_zip` pour rester pilotable en test sans QFileDialog. On ne
+        REFUSE pas un zip non reconnu (l'utilisateur peut savoir mieux), on avertit : mais
+        l'avertissement est rouge et visible, car extraire n'importe quoi dans Binaries est
+        le genre d'erreur qu'on ne remarque qu'au prochain crash.
+        """
+        self._zip = path
+        self.zip_label.setText(str(path))
+        if looks_like_ue4ss_zip(path):
+            self.zip_warning.hide()
+        else:
+            self.zip_warning.setText(
+                "Cette archive ne ressemble pas à UE4SS (dwmapi.dll + UE4SS-settings.ini "
+                "introuvables). Vérifiez que c'est bien le bon .zip.")
+            self.zip_warning.show()
+
+    def _run(self) -> None:
+        """Lance l'installation et affiche le rapport étape par étape.
+
+        Passe par `ue4ss_setup.run` (référencé via le module pour rester remplaçable en
+        test). `ctx.discover()` reconstruit ensuite l'état disque : le renommage a changé
+        le chemin de l'install, la garder en mémoire pointerait sur un dossier disparu.
+        """
+        report = ue4ss_setup.run(
+            self.ctx.install, self.ctx.ledger,
+            ue4ss_zip=self._zip, probe=doctor.steam_processes_running)
+        self._render_report(report)
+        self.ctx.discover()
+
+    def _render_report(self, report: SetupReport) -> None:
+        while self.report_layout.count():
+            item = self.report_layout.takeAt(0)
+            if (w := item.widget()) is not None:
+                w.deleteLater()
+
+        summary = QLabel(report.message)
+        summary.setObjectName("SectionTitle")
+        summary.setWordWrap(True)
+        self.report_layout.addWidget(summary)
+
+        for step in report.steps:
+            self.report_layout.addWidget(self._step_row(step))
+        self.report_layout.addStretch(1)
+
+    def _step_row(self, step: ue4ss_setup.SetupStep) -> QWidget:
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.setSpacing(METRICS.pad_sm)
+
+        dot = QLabel("●")
+        dot.setStyleSheet(f"color:{PALETTE.ok if step.ok else PALETTE.error};")
+        row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        label = QLabel(step.label)
+        label.setWordWrap(True)
+        col.addWidget(label)
+        if step.detail:
+            detail = QLabel(step.detail)
+            detail.setObjectName("Dim")
+            detail.setWordWrap(True)
+            col.addWidget(detail)
+        row.addLayout(col, 1)
+        return holder
+
+
 class DashboardPage(Page):
     """Accueil : état de l'installation, diagnostics, et lancement du jeu."""
 
@@ -263,7 +456,8 @@ class DashboardPage(Page):
             self.install_card.body.addWidget(QLabel(
                 "Aucune installation de Fading Echo trouvée."))
             hint = QLabel("Le jeu n'a pas été détecté dans vos bibliothèques Steam. "
-                          "Indiquez son dossier à la main pour continuer.")
+                          "Indiquez son dossier à la main pour continuer. Vous pouvez en "
+                          "désigner plusieurs — elles apparaîtront dans un sélecteur.")
             hint.setObjectName("Dim")
             hint.setWordWrap(True)
             self.install_card.body.addWidget(hint)
@@ -271,6 +465,23 @@ class DashboardPage(Page):
             btn.clicked.connect(self._browse)
             self.install_card.body.addWidget(btn, 0, Qt.AlignmentFlag.AlignLeft)
             return
+
+        # Sélecteur d'installation. Le launcher choisit tout seul une install au démarrage
+        # (souvent la démo, découverte en premier), et sans ce sélecteur l'utilisateur du
+        # jeu complet n'a AUCUN moyen de basculer dessus : il diagnostiquerait la démo en
+        # croyant regarder son jeu. On ne l'affiche qu'à partir de deux installs, sinon
+        # c'est une liste déroulante à un seul choix, du bruit pur.
+        if len(self.ctx.installs) > 1:
+            self.install_picker = ComboBox()
+            for i in self.ctx.installs:
+                self.install_picker.addItem(_install_label(i))
+            current = next((n for n, i in enumerate(self.ctx.installs)
+                            if i.root == inst.root), 0)
+            # On positionne l'index AVANT de brancher le signal : sinon la simple
+            # construction déclencherait un select() (et un refresh réentrant).
+            self.install_picker.setCurrentIndex(current)
+            self.install_picker.currentIndexChanged.connect(self._on_pick_install)
+            self.install_card.body.addWidget(self.install_picker)
 
         row = QHBoxLayout()
         name = QLabel(inst.name)
@@ -292,6 +503,17 @@ class DashboardPage(Page):
         path.setObjectName("Dim")
         path.setWordWrap(True)
         self.install_card.body.addWidget(path)
+
+        # Bouton d'installation/réparation d'UE4SS. Proposé dès qu'il manque UE4SS OU que
+        # le chemin contient un caractère non-ASCII : ce dernier cas est le piège du jeu
+        # complet (`Project Ygrό`), où UE4SS est « présent » mais meurt au démarrage. Les
+        # deux se règlent par la même opération, d'où un seul bouton.
+        if not inst.has_ue4ss or inst.non_ascii_path:
+            self.ue4ss_btn = QPushButton("Installer UE4SS et corriger le jeu")
+            self.ue4ss_btn.setObjectName("Primary")
+            self.ue4ss_btn.clicked.connect(self._install_ue4ss)
+            self.install_card.body.addWidget(
+                self.ue4ss_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
     def _render_diagnoses(self) -> None:
         self._clear(self.diag_card)
@@ -413,6 +635,19 @@ class DashboardPage(Page):
                 self, "Dossier non reconnu",
                 "Ce dossier ne ressemble pas à une installation de Fading Echo.\n\n"
                 "Le dossier attendu contient « UE_YGRO\\Binaries\\Win64 ».")
+
+    def _on_pick_install(self, index: int) -> None:
+        """Bascule l'install active depuis le sélecteur. Ignore un index hors liste
+        (peut arriver le temps d'une reconstruction du combo pendant un refresh)."""
+        if 0 <= index < len(self.ctx.installs):
+            self.ctx.select(self.ctx.installs[index])
+
+    def _install_ue4ss(self) -> None:
+        """Ouvre l'assistant d'installation d'UE4SS pour l'install active."""
+        if self.ctx.install is None:
+            return
+        dialog = Ue4ssSetupDialog(self.ctx, self)
+        self._present_dialog(dialog)
 
     def _apply_fix(self, d: doctor.Diagnosis) -> None:
         if d.fix is None:

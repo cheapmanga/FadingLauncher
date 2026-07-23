@@ -18,10 +18,6 @@ scratchpad/
 .DS_Store
 Thumbs.db
 
-# Les portraits sont extraits par l'utilisateur depuis le jeu (droits Ygro/Fishing Cactus).
-# On versionne le dossier mais pas les images elles-mêmes — voir resources/portraits/README.
-fe_launcher/resources/portraits/*.png
-fe_launcher/resources/portraits/*.jpg
 
 # Sorties de compilation PyInstaller
 /dist/

@@ -88,6 +88,32 @@ class Prop:
             raise TypeError('%s is not a BoolProperty' % s.name)
         s.flags = (s.flags | TAG_BOOL_TRUE) if v else (s.flags & ~TAG_BOOL_TRUE)
 
+    #: Types dont la valeur tient sur une largeur FIXE : les modifier ne change pas la
+    #: taille du fichier, donc c'est sûr. Tout le reste (chaînes, tableaux, maps) casse
+    #: le cadrage inter-objets, qui n'est pas rétro-conçu — on refuse.
+    _FIXED_FMT = {'IntProperty': '<i', 'Int64Property': '<q',
+                  'FloatProperty': '<f', 'DoubleProperty': '<d'}
+
+    def editable(s):
+        """Vrai si cette propriété peut être modifiée sans risque."""
+        return s.type.name == 'BoolProperty' or s.type.name in s._FIXED_FMT \
+            or (s.type.name == 'ByteProperty' and len(s.data) == 1)
+
+    def set_value(s, v):
+        """Écrit une valeur, uniquement pour les types à largeur fixe. Sûr = round-trip
+        exact ; refuse les types dont l'édition casserait le fichier."""
+        t = s.type.name
+        if t == 'BoolProperty':
+            s.set_bool(bool(v)); return
+        if t in s._FIXED_FMT:
+            new = struct.pack(s._FIXED_FMT[t], v)
+            assert len(new) == len(s.data), 'largeur inattendue'
+            s.data = new; return
+        if t == 'ByteProperty' and len(s.data) == 1:
+            s.data = bytes([int(v) & 0xFF]); return
+        raise TypeError('%s (%s) : édition non supportée (casserait le fichier)'
+                        % (s.name, t))
+
     def value(s):
         t = s.type.name
         if t == 'IntProperty':    return struct.unpack('<i', s.data)[0]

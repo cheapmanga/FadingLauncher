@@ -38,7 +38,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from ...core import luaconf, mods as mods_mod, moddocs
@@ -201,6 +201,11 @@ class ModsPage(Page):
         self.header = PageHeader(
             "Mods",
             "Cochez pour activer. Tout se règle ici : aucun fichier à éditer.")
+        # Bouton d'installation des mods embarqués : le launcher livre ses mods, ce
+        # bouton les copie dans le jeu (ceux qui manquent) en une fois.
+        self.install_btn = QPushButton("Installer les mods fournis")
+        self.install_btn.clicked.connect(self._install_bundled)
+        self.header.add_action(self.install_btn)
         root.addWidget(self.header)
 
         self.search = QLineEdit()
@@ -386,6 +391,35 @@ class ModsPage(Page):
         self.detail_card.body.addStretch(1)
 
     # --- actions ---
+
+    def _install_bundled(self) -> None:
+        from ...core import modinstall
+        inst = self.ctx.install
+        if inst is None or inst.ue4ss is None:
+            QMessageBox.warning(
+                self, "UE4SS requis",
+                "Les mods s'installent dans UE4SS, qui n'est pas présent. "
+                "Installez d'abord UE4SS depuis le tableau de bord.")
+            return
+        missing = [m.name for m in modinstall.bundled_mods()
+                   if not modinstall.is_installed(inst.ue4ss, m.name)]
+        if not missing:
+            QMessageBox.information(self, "Rien à installer",
+                                    "Tous les mods fournis sont déjà installés.")
+            return
+        confirm = QMessageBox.question(
+            self, "Installer les mods",
+            f"{len(missing)} mod(s) fourni(s) vont être installés dans le jeu "
+            f"(et UEHelpers, dont ils dépendent). C'est réversible depuis les "
+            f"paramètres.\n\nContinuer ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if confirm is not QMessageBox.StandardButton.Yes:
+            return
+        report = modinstall.install_all(inst.ue4ss, self.ctx.ledger, names=missing)
+        QMessageBox.information(
+            self, "Installation" if report.ok else "Installation incomplète",
+            report.message)
+        self.ctx.refresh()
 
     def _on_search(self, text: str) -> None:
         self._filter = text.strip().lower()

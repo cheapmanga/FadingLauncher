@@ -49,7 +49,19 @@ class AppContext(QObject):
         if self.settings.last_install:
             chosen = next((i for i in self.installs
                            if str(i.root) == self.settings.last_install), None)
-        self.select(chosen or (self.installs[0] if self.installs else None))
+        # Sans install mémorisée, on PRÉFÈRE le jeu complet à la démo : quelqu'un qui a
+        # les deux veut jouer au vrai jeu, pas à la démo. Ne rien préférer faisait
+        # démarrer la démo au hasard de l'ordre de détection.
+        self.select(chosen or self._default_install())
+
+    def _default_install(self) -> "GameInstall | None":
+        if not self.installs:
+            return None
+        from ..core.paths import Edition
+        full = [i for i in self.installs if i.edition is Edition.FULL]
+        if full:
+            return full[0]
+        return self.installs[0]
 
     def select(self, install: GameInstall | None) -> None:
         self.install = install

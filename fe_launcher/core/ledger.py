@@ -92,6 +92,25 @@ class UndoResult:
     message: str
 
 
+def _prune_empty_parents(directory: Path, limit: int = 6) -> None:
+    """Remonte en supprimant les dossiers vides, tant qu'ils le sont.
+
+    Ne touche QU'À des dossiers vides : sûr quel que soit qui les a créés. Le premier
+    dossier non vide (il contient encore des fichiers de l'utilisateur, ou d'autres
+    mods) arrête la remontée. `limit` borne le nombre de niveaux par prudence.
+    """
+    d = directory
+    for _ in range(limit):
+        try:
+            if d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+                d = d.parent
+            else:
+                return
+        except OSError:
+            return
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -315,6 +334,11 @@ class Ledger:
                     return UndoResult(e, True,
                                       f"{target.name} a changé depuis — laissé en place")
                 target.unlink()
+                # Élague les dossiers parents devenus vides. Sans ça, désinstaller un
+                # mod retire ses fichiers mais laisse la coquille du dossier, que
+                # `mods.load` reprend ensuite pour un mod fantôme. On ne retire QUE des
+                # dossiers vides — c'est sûr quel que soit qui les a créés.
+                _prune_empty_parents(target.parent)
                 return UndoResult(e, True, f"supprimé : {target.name}")
 
             if e.action in (Action.MODIFY_FILE, Action.DELETE_FILE):

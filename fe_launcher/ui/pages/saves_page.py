@@ -38,12 +38,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
+    QLineEdit, QMessageBox, QPushButton, QSpinBox, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
+from ...core import savelib as savelib_mod
 from ...core import saves as saves_mod
 from ..main_window import Page
 from ..theme import METRICS, PALETTE
@@ -62,6 +64,515 @@ def human_size(size: int) -> str:
     if size >= 1024:
         return f"{size / 1024:.0f} Ko"
     return f"{size} o"
+
+
+#: Noms de champs « parlants », montrés en évidence dans l'éditeur simple avec un
+#: libellé français. Tout le reste part dans la liste repliable « Autres champs » : une
+#: sauvegarde expose ~30 noms distincts et 2500 champs, dont beaucoup de plomberie
+#: interne (`bCanBeDamaged`, `bBaseLocked`…) qui n'apprend rien au joueur. On concentre
+#: donc l'attention sur ce qui correspond à une notion de progression identifiable.
+FEATURED_FIELDS: tuple[tuple[str, str], ...] = (
+    ("Flying Water Unlocked", "Eau volante débloquée"),
+    ("bUnlocked", "Éléments déverrouillés"),
+    ("bLooted", "Coffres ramassés"),
+    ("AlreadyDestroyed", "Objets destructibles détruits"),
+    ("bCheckpointActivated", "Checkpoints activés"),
+    ("bDialPlayed", "Dialogues joués"),
+    ("HasActivatedAtLeastOnce", "Mécanismes activés"),
+    ("bGlitchActivated", "Glitchs activés"),
+    ("ConnectedSource", "Sources connectées"),
+)
+
+#: Libellés lisibles pour les noms non « featured », quand un existe. Sinon on retombe
+#: sur le nom brut : inventer un libellé faux serait pire que montrer le nom technique.
+FIELD_LABELS: dict[str, str] = {
+    "bBaseActivated": "Socles activés",
+    "bBaseLocked": "Socles verrouillés",
+    "bPanelShown": "Panneaux révélés",
+    "ElevatorActivated": "Ascenseurs activés",
+    "bGridOpened": "Grilles ouvertes",
+    "bLaserActivated": "Lasers activés",
+    "bVinesBurned": "Lianes brûlées",
+    "WaterTriggerActivated": "Déclencheurs d'eau",
+    "isTutorialDone": "Tutoriels terminés",
+    "bClosed": "Éléments fermés",
+    "bConnectionRestaured": "Connexions rétablies",
+    "bHasPortableItem": "Objets portables présents",
+    "bAlreadyPlayed": "Séquences déjà jouées",
+    "bEndSplineReached": "Fins de trajet atteintes",
+    "bUseLightOnFirstFish": "Lumière du premier poisson",
+    "bAutosaveUsed": "Sauvegardes auto utilisées",
+    "bActivated": "Activés",
+    "bCanBeDamaged": "Peuvent être endommagés",
+    "AlphaTrain": "Position de train (alpha)",
+    "Revision": "Révision du format",
+    "BastionConnected": "Bastion connecté",
+    "BastionDoubleConnected": "Bastion doublement connecté",
+}
+
+
+def _field_label(name: str) -> str:
+    """Libellé lisible d'un nom de champ, avec repli sur le nom brut."""
+    for key, label in FEATURED_FIELDS:
+        if key == name:
+            return label
+    return FIELD_LABELS.get(name, name)
+
+
+class Collapsible(QWidget):
+    """Section repliable : un bouton-titre qui déplie/replie un corps.
+
+    Le corps peut être construit paresseusement (`on_first_expand`) — indispensable pour
+    la vue brute de l'éditeur, qui aligne ~2500 champs : les fabriquer d'emblée
+    ralentirait l'ouverture de la page pour un écran que la plupart n'ouvriront jamais.
+    """
+
+    def __init__(self, title: str, *, on_first_expand=None, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._on_first_expand = on_first_expand
+        self._expanded_once = False
+
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(METRICS.pad_sm)
+
+        self.button = QToolButton()
+        self.button.setText(title)
+        self.button.setCheckable(True)
+        self.button.setArrowType(Qt.ArrowType.RightArrow)
+        self.button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.button.setCursor(Qt.CursorShape.PointingHandCursor)
+        # QToolButton n'hérite pas du style des QPushButton : on lui donne l'allure d'un
+        # titre de section cliquable, sans couleur en dur hors PALETTE.
+        self.button.setStyleSheet(
+            f"QToolButton {{ border:none; background:transparent; color:{PALETTE.text};"
+            f" font-size:14px; font-weight:600; padding:{METRICS.pad_sm}px 0; }}"
+            f"QToolButton:hover {{ color:{PALETTE.accent}; }}")
+        col.addWidget(self.button)
+
+        self.container = QWidget()
+        self.body = QVBoxLayout(self.container)
+        self.body.setContentsMargins(METRICS.pad, 0, 0, 0)
+        self.body.setSpacing(METRICS.pad_sm)
+        self.container.setVisible(False)
+        col.addWidget(self.container)
+
+        self.button.toggled.connect(self._toggle)
+
+    def _toggle(self, on: bool) -> None:
+        self.button.setArrowType(
+            Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+        if on and not self._expanded_once:
+            self._expanded_once = True
+            if self._on_first_expand is not None:
+                self._on_first_expand(self.body)
+        self.container.setVisible(on)
+
+    def set_expanded(self, on: bool) -> None:
+        self.button.setChecked(on)
+
+
+class BoolGroupRow(QWidget):
+    """Un nom de champ booléen partagé par plusieurs objets, présenté en agrégat.
+
+    Beaucoup de noms (`bUnlocked`, `AlreadyDestroyed`…) reviennent des dizaines à
+    centaines de fois : les afficher un par un serait illisible et sans signification —
+    « le coffre n°87 est-il ramassé ? » n'intéresse personne. On montre donc « X/Y
+    activés » et une case maîtresse qui bascule tout le groupe d'un coup. Les diffs sont
+    calculés par rapport aux valeurs d'origine, jamais accumulés.
+    """
+
+    def __init__(self, name: str, fields: list, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.name = name
+        self.fields = fields
+        self._original = {f.index: bool(f.value) for f in fields}
+        self._state = dict(self._original)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.setSpacing(METRICS.pad)
+
+        self.box = QCheckBox(_field_label(name))
+        self.box.setTristate(True)
+        row.addWidget(self.box, 1)
+
+        self.count = QLabel()
+        self.count.setObjectName("Dim")
+        row.addWidget(self.count, 0)
+
+        self._sync()
+        self.box.clicked.connect(self._on_click)
+
+    def _on_click(self, _checked: bool = False) -> None:
+        # Un clic force une valeur définie pour tout le groupe : si tout n'est pas déjà
+        # activé, on active tout ; sinon on désactive tout. On ne laisse jamais l'état
+        # se figer sur « partiel », qui n'a pas de sens comme intention utilisateur.
+        target = not all(self._state.values())
+        for idx in self._state:
+            self._state[idx] = target
+        self._sync()
+
+    def _sync(self) -> None:
+        done = sum(self._state.values())
+        total = len(self._state)
+        state = (Qt.CheckState.Checked if done == total
+                 else Qt.CheckState.Unchecked if done == 0
+                 else Qt.CheckState.PartiallyChecked)
+        self.box.blockSignals(True)
+        self.box.setCheckState(state)
+        self.box.blockSignals(False)
+        self.count.setText(f"{done}/{total} activés")
+
+    def changes(self) -> dict[int, bool]:
+        """Modifications par rapport à l'état d'origine (index → nouvelle valeur)."""
+        return {idx: val for idx, val in self._state.items()
+                if val != self._original[idx]}
+
+
+class ScalarFieldRow(QWidget):
+    """Un champ numérique unique (entier ou décimal), éditable individuellement.
+
+    Contrairement aux booléens, un scalaire porte une valeur qui a un sens propre
+    (`ConnectedSource`, position d'un train…). Le drapeau `_dirty` évite de reporter une
+    fausse modification : un décimal réaffiché avec moins de décimales que l'original
+    diffère numériquement sans que l'utilisateur y ait touché.
+    """
+
+    def __init__(self, field, *, label: str | None = None, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.field = field
+        self._dirty = False
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.setSpacing(METRICS.pad)
+
+        text = label if label is not None else _field_label(field.name)
+        lbl = QLabel(text)
+        lbl.setWordWrap(True)
+        row.addWidget(lbl, 1)
+
+        if field.type == "DoubleProperty" or field.type == "FloatProperty":
+            self.spin = QDoubleSpinBox()
+            self.spin.setDecimals(6)
+            self.spin.setRange(-1e12, 1e12)
+            self.spin.setValue(float(field.value or 0))
+        else:
+            self.spin = QSpinBox()
+            self.spin.setRange(-(2 ** 31), 2 ** 31 - 1)
+            self.spin.setValue(int(field.value or 0))
+        self.spin.setMinimumWidth(140)
+        # La valeur initiale est posée AVANT le branchement : `valueChanged` se déclenche
+        # aussi sur `setValue`, et on ne veut marquer « modifié » que sur action humaine.
+        self.spin.valueChanged.connect(self._mark_dirty)
+        row.addWidget(self.spin, 0)
+
+    def _mark_dirty(self, _value=None) -> None:
+        self._dirty = True
+
+    def changes(self) -> dict[int, object]:
+        if not self._dirty:
+            return {}
+        return {self.field.index: self.spin.value()}
+
+
+class RawFieldRow(QWidget):
+    """Une ligne de la vue brute « avancée » : nom + type + index + contrôle.
+
+    C'est le « code » que l'on cache derrière le bandeau avancé : chaque champ est
+    montré tel quel, éditable un par un, sans regroupement ni libellé traduit. Réservé à
+    qui sait ce qu'il fait.
+    """
+
+    def __init__(self, field, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.field = field
+        self._original = bool(field.value) if field.is_bool else None
+        self._dirty = False
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 1, 0, 1)
+        row.setSpacing(METRICS.pad_sm)
+
+        idx = QLabel(f"#{field.index}")
+        idx.setObjectName("Dim")
+        idx.setMinimumWidth(56)
+        row.addWidget(idx, 0)
+
+        name = QLabel(field.name)
+        name.setObjectName("Mono")
+        name.setMinimumWidth(220)
+        row.addWidget(name, 1)
+
+        row.addWidget(Badge(field.type.replace("Property", ""), "muted"), 0)
+
+        if field.is_bool:
+            self.box = QCheckBox()
+            self.box.setChecked(bool(field.value))
+            row.addWidget(self.box, 0)
+            self.spin = None
+        else:
+            self.box = None
+            if field.type in ("DoubleProperty", "FloatProperty"):
+                self.spin = QDoubleSpinBox()
+                self.spin.setDecimals(6)
+                self.spin.setRange(-1e12, 1e12)
+                self.spin.setValue(float(field.value or 0))
+            else:
+                self.spin = QSpinBox()
+                self.spin.setRange(-(2 ** 31), 2 ** 31 - 1)
+                self.spin.setValue(int(field.value or 0))
+            self.spin.setMinimumWidth(130)
+            self.spin.valueChanged.connect(self._mark_dirty)
+            row.addWidget(self.spin, 0)
+
+    def _mark_dirty(self, _value=None) -> None:
+        self._dirty = True
+
+    def changes(self) -> dict[int, object]:
+        if self.box is not None:
+            if self.box.isChecked() != self._original:
+                return {self.field.index: self.box.isChecked()}
+            return {}
+        if self._dirty:
+            return {self.field.index: self.spin.value()}
+        return {}
+
+
+class SaveEditor(QWidget):
+    """Éditeur graphique d'un `.sav` : cases et champs numériques, code caché.
+
+    Trois strates de lisibilité décroissante :
+
+    1. les champs « parlants » (progression identifiable), montrés d'emblée ;
+    2. « Autres champs », repliable, avec le reste des agrégats ;
+    3. « Avancé », repliable et construit à la demande, la vue brute champ par champ.
+
+    L'éditeur ne persiste rien tout seul : `save()` rassemble les diffs et les confie à
+    `savelib.write_fields`, qui journalise (donc annulable) et garantit l'aller-retour
+    exact du format. Une valeur incohérente ne casse pas le fichier mais peut rendre une
+    partie bizarre — l'avertissement à l'écran le dit, et recommande une sauvegarde de
+    secours.
+    """
+
+    saved = Signal()
+
+    def __init__(self, ctx, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.ctx = ctx
+        self._path: Path | None = None
+        self.default_dir: Path | None = None
+        self._group_rows: list = []       # BoolGroupRow | ScalarFieldRow (simple + autres)
+        self._raw_rows: list = []         # RawFieldRow (vue brute avancée)
+
+        self.root = QVBoxLayout(self)
+        self.root.setContentsMargins(0, 0, 0, 0)
+        self.root.setSpacing(METRICS.pad_sm)
+        self._rebuild()
+
+    # --- fichier ------------------------------------------------------------------
+
+    def set_path(self, path: Path | None) -> None:
+        self._path = Path(path) if path is not None else None
+        self._rebuild()
+
+    @property
+    def path(self) -> Path | None:
+        return self._path
+
+    def _browse(self) -> None:
+        start = str(self.default_dir or (self._path.parent if self._path else Path.home()))
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, "Choisir une sauvegarde à modifier", start,
+            "Sauvegardes Fading Echo (*.sav)")
+        if chosen:
+            self.set_path(Path(chosen))
+
+    # --- rendu --------------------------------------------------------------------
+
+    def _clear(self) -> None:
+        self._group_rows = []
+        self._raw_rows = []
+        while self.root.count():
+            item = self.root.takeAt(0)
+            if (w := item.widget()) is not None:
+                w.setParent(None)
+                w.deleteLater()
+
+    def _rebuild(self) -> None:
+        self._clear()
+
+        self.root.addWidget(self._file_row())
+        self.root.addWidget(self._safety_box())
+
+        if self._path is None:
+            hint = QLabel(
+                "Aucun fichier sélectionné. Par défaut, l'éditeur ouvre le "
+                "« LastCheckpoint.sav » du dossier de sauvegardes courant ; sinon, "
+                "choisissez un fichier à modifier.")
+            hint.setObjectName("Dim")
+            hint.setWordWrap(True)
+            self.root.addWidget(hint)
+            return
+
+        fields = savelib_mod.editable_fields(self._path)
+        if not fields:
+            bad = QLabel(
+                f"« {self._path.name} » est illisible ou ne contient aucun champ "
+                "modifiable sans risque. Vérifiez que c'est bien une sauvegarde du jeu.")
+            bad.setStyleSheet(f"color:{PALETTE.error};")
+            bad.setWordWrap(True)
+            self.root.addWidget(bad)
+            return
+
+        # Regroupement par nom, dans l'ordre de première apparition — stable et
+        # reproductible entre deux ouvertures du même fichier.
+        groups: dict[str, list] = {}
+        for f in fields:
+            groups.setdefault(f.name, []).append(f)
+
+        featured = [name for name, _ in FEATURED_FIELDS if name in groups]
+        others = [name for name in groups if name not in set(featured)]
+
+        self.root.addWidget(self._group_section("Progression", featured, groups))
+
+        rest = Collapsible(f"Autres champs ({len(others)})")
+        for name in others:
+            self._add_group(rest.body, name, groups[name])
+        self.root.addWidget(rest)
+
+        self.root.addWidget(separator())
+        advanced = Collapsible(
+            f"Avancé — vue brute ({len(fields)} champs)",
+            on_first_expand=lambda body, fs=fields: self._fill_raw(body, fs))
+        self.advanced = advanced
+        self.root.addWidget(advanced)
+
+        save_btn = QPushButton("Enregistrer les modifications")
+        save_btn.setObjectName("Primary")
+        save_btn.clicked.connect(self.save)
+        self.root.addWidget(save_btn)
+
+    def _file_row(self) -> QWidget:
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(METRICS.pad_sm)
+        label = QLabel(str(self._path) if self._path else "Aucun fichier sélectionné")
+        label.setObjectName("Mono")
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row.addWidget(label, 1)
+        browse = QPushButton("Choisir un fichier…")
+        browse.clicked.connect(self._browse)
+        row.addWidget(browse, 0)
+        return holder
+
+    def _safety_box(self) -> QWidget:
+        box = QLabel(
+            "Seules les modifications SÛRES sont proposées : cases à cocher et nombres à "
+            "largeur fixe. L'édition ne casse jamais le fichier — l'aller-retour du "
+            "format est exact à l'octet près — MAIS une valeur incohérente peut rendre "
+            "une partie bizarre (zone à moitié débloquée, compteur impossible). "
+            "Chargez d'abord une sauvegarde de secours depuis la bibliothèque ci-dessus, "
+            "ou prenez un instantané, avant de modifier une vraie partie.")
+        box.setWordWrap(True)
+        box.setStyleSheet(
+            f"color:{PALETTE.warn}; background:{PALETTE.warn_bg};"
+            f"border:1px solid {PALETTE.warn}44; border-radius:{METRICS.radius_sm}px;"
+            f"padding:{METRICS.pad_sm}px;")
+        return box
+
+    def _group_section(self, title: str, names: list[str], groups: dict) -> QWidget:
+        holder = QWidget()
+        col = QVBoxLayout(holder)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(METRICS.pad_sm)
+        head = QLabel(title)
+        head.setObjectName("SectionTitle")
+        col.addWidget(head)
+        if not names:
+            empty = QLabel("Aucun champ de progression identifiable dans ce fichier.")
+            empty.setObjectName("Dim")
+            empty.setWordWrap(True)
+            col.addWidget(empty)
+        for name in names:
+            self._add_group(col, name, groups[name])
+        return holder
+
+    def _add_group(self, layout, name: str, fields: list) -> None:
+        """Ajoute un agrégat booléen OU une série de scalaires pour un nom donné."""
+        if all(f.is_bool for f in fields):
+            row = BoolGroupRow(name, fields)
+            self._group_rows.append(row)
+            layout.addWidget(row)
+            return
+        # Scalaires : chaque valeur a un sens propre, on les liste individuellement,
+        # numérotées quand le même nom en porte plusieurs.
+        scalars = [f for f in fields if not f.is_bool]
+        multiple = len(scalars) > 1
+        for i, f in enumerate(scalars, 1):
+            label = f"{_field_label(name)} #{i}" if multiple else _field_label(name)
+            row = ScalarFieldRow(f, label=label)
+            self._group_rows.append(row)
+            layout.addWidget(row)
+
+    def _fill_raw(self, layout, fields: list) -> None:
+        """Construit la vue brute à la demande (première ouverture du bandeau)."""
+        for f in fields:
+            row = RawFieldRow(f)
+            self._raw_rows.append(row)
+            layout.addWidget(row)
+
+    # --- écriture -----------------------------------------------------------------
+
+    def collect_changes(self) -> dict[int, object]:
+        """Rassemble les diffs de toutes les vues. La vue brute a le dernier mot : si un
+        même champ a été touché des deux côtés, la valeur brute (explicite) l'emporte."""
+        changes: dict[int, object] = {}
+        for row in self._group_rows:
+            changes.update(row.changes())
+        for row in self._raw_rows:
+            changes.update(row.changes())
+        return changes
+
+    def save(self) -> None:
+        if self._path is None:
+            return
+        changes = self.collect_changes()
+        if not changes:
+            QMessageBox.information(
+                self, "Aucune modification",
+                "Rien n'a été modifié : aucune sauvegarde à écrire.")
+            return
+        confirm = QMessageBox(self)
+        confirm.setWindowTitle("Enregistrer les modifications")
+        confirm.setIcon(QMessageBox.Icon.Warning)
+        confirm.setText(f"Écrire {len(changes)} modification(s) dans "
+                        f"« {self._path.name} » ?")
+        confirm.setInformativeText(
+            "Une vraie sauvegarde va être modifiée. L'opération est annulable depuis le "
+            "journal des modifications, mais mieux vaut avoir une sauvegarde de secours "
+            "en cas de valeur incohérente. Le jeu doit être fermé.")
+        confirm.setStandardButtons(QMessageBox.StandardButton.Yes
+                                   | QMessageBox.StandardButton.No)
+        confirm.setDefaultButton(QMessageBox.StandardButton.No)
+        if confirm.exec() != QMessageBox.StandardButton.Yes:
+            return
+        ok = savelib_mod.write_fields(self._path, changes, ledger=self.ctx.ledger)
+        if ok:
+            QMessageBox.information(
+                self, "Modifications enregistrées",
+                f"{len(changes)} champ(s) écrit(s) dans « {self._path.name} ». "
+                "L'opération reste annulable depuis le journal.")
+            self.saved.emit()
+            self.set_path(self._path)   # recharge la nouvelle valeur de référence
+        else:
+            QMessageBox.warning(
+                self, "Échec de l'écriture",
+                "Le fichier n'a pas pu être modifié (illisible, ou champ refusé). "
+                "La sauvegarde n'a pas été touchée.")
 
 
 class SavesPage(Page):
@@ -94,6 +605,20 @@ class SavesPage(Page):
 
         self.cloud_card = Card()
         root.addWidget(self.cloud_card)
+
+        self.library_card = Card()
+        root.addWidget(self.library_card)
+
+        # L'éditeur est construit UNE fois et jamais détruit par un rafraîchissement :
+        # il garde son fichier ouvert et l'état de ses cases pendant que d'autres cartes
+        # se reconstruisent autour de lui.
+        self.editor_card = Card()
+        editor_title = QLabel("Modifier une sauvegarde")
+        editor_title.setObjectName("SectionTitle")
+        self.editor_card.body.addWidget(editor_title)
+        self.editor = SaveEditor(self.ctx)
+        self.editor_card.body.addWidget(self.editor)
+        root.addWidget(self.editor_card)
 
         self.slots_card = Card()
         root.addWidget(self.slots_card)
@@ -160,6 +685,8 @@ class SavesPage(Page):
     def refresh(self) -> None:
         self._render_location()
         self._render_cloud()
+        self._render_library()
+        self._render_editor()
         self._render_slots()
         root = self.save_root
         self.snapshot_btn.setEnabled(root is not None and root.is_dir())
@@ -258,6 +785,154 @@ class SavesPage(Page):
             lbl.setStyleSheet(f"color:{PALETTE.error};")
             self.cloud_card.body.addWidget(lbl)
 
+    # --- bibliothèque de sauvegardes prêtes ---------------------------------------
+
+    def _render_library(self) -> None:
+        """Liste les sauvegardes embarquées (`savelib.bundled_saves`) avec un bouton
+        « Charger » par ligne, et un bouton d'annulation du dernier chargement.
+
+        La bibliothèque est indépendante du dossier de saves : on peut la CONSULTER même
+        sans dossier détecté. Seul le chargement a besoin d'une destination — d'où
+        l'avertissement affiché quand aucun dossier n'est désigné.
+        """
+        self._clear(self.library_card)
+        title = QLabel("Sauvegardes prêtes à charger")
+        title.setObjectName("SectionTitle")
+        self.library_card.body.addWidget(title)
+
+        intro = QLabel(
+            "Des parties à différents points de progression, livrées avec le launcher. "
+            "En charger une remplace votre sauvegarde actuelle — l'état d'avant est mis "
+            "de côté et récupérable UNE seule fois (le chargement suivant l'écrase).")
+        intro.setObjectName("Dim")
+        intro.setWordWrap(True)
+        self.library_card.body.addWidget(intro)
+
+        root = self.save_root
+        if root is None or not root.is_dir():
+            warn = QLabel(
+                "!  Aucun dossier de sauvegardes désigné : vous pouvez consulter la "
+                "liste, mais pas encore charger. Choisissez d'abord un dossier ci-dessus.")
+            warn.setWordWrap(True)
+            warn.setStyleSheet(f"color:{PALETTE.warn};")
+            self.library_card.body.addWidget(warn)
+
+        if savelib_mod.has_rollback(save_root=root):
+            undo = QPushButton("Annuler le dernier chargement")
+            undo.clicked.connect(self._rollback_bundled)
+            undo_row = QHBoxLayout()
+            undo_row.addStretch(1)
+            undo_row.addWidget(undo)
+            holder = QWidget()
+            holder.setLayout(undo_row)
+            self.library_card.body.addWidget(holder)
+
+        saves = savelib_mod.bundled_saves()
+        if not saves:
+            empty = QLabel("Aucune sauvegarde embarquée n'a été trouvée.")
+            empty.setObjectName("Dim")
+            self.library_card.body.addWidget(empty)
+            return
+
+        for i, save in enumerate(saves):
+            if i:
+                self.library_card.body.addWidget(separator())
+            self.library_card.body.addWidget(self._bundled_row(save, enabled=root is not None and root.is_dir()))
+
+    def _bundled_row(self, save, *, enabled: bool) -> QWidget:
+        holder = QWidget()
+        col = QVBoxLayout(holder)
+        col.setContentsMargins(0, METRICS.pad_sm, 0, METRICS.pad_sm)
+        col.setSpacing(3)
+
+        top = QHBoxLayout()
+        top.setSpacing(METRICS.pad_sm)
+        name = QLabel(save.name)
+        name.setObjectName("SectionTitle")
+        top.addWidget(name)
+        if not save.complete:
+            top.addWidget(Badge("INCOMPLÈTE", "warn"))
+        top.addStretch(1)
+        load = QPushButton("Charger")
+        load.setEnabled(enabled and save.complete)
+        load.clicked.connect(lambda _=False, s=save: self._load_bundled(s))
+        top.addWidget(load)
+        top_holder = QWidget()
+        top_holder.setLayout(top)
+        col.addWidget(top_holder)
+
+        if save.progress:
+            progress = QLabel(save.progress)
+            progress.setObjectName("Dim")
+            progress.setWordWrap(True)
+            col.addWidget(progress)
+        return holder
+
+    def _load_bundled(self, save) -> None:
+        root = self.save_root
+        if root is None or not root.is_dir():
+            return
+        confirm = QMessageBox(self)
+        confirm.setWindowTitle("Charger une sauvegarde")
+        confirm.setIcon(QMessageBox.Icon.Warning)
+        confirm.setText(f"Charger « {save.name} » ?")
+        confirm.setInformativeText(
+            "Votre sauvegarde ACTUELLE va être mise de côté (récupérable UNE seule fois "
+            "via « Annuler le dernier chargement »), puis remplacée par cette "
+            "sauvegarde.\n\n"
+            "Si vous rechargez une autre sauvegarde ensuite, cette mise de côté sera "
+            "perdue — on ne garde qu'un seul retour en arrière.\n\n"
+            "Le jeu doit être fermé.")
+        confirm.setStandardButtons(QMessageBox.StandardButton.Yes
+                                   | QMessageBox.StandardButton.No)
+        confirm.setDefaultButton(QMessageBox.StandardButton.No)
+        if confirm.exec() != QMessageBox.StandardButton.Yes:
+            return
+        report = self.apply_bundled(save)
+        self._show_apply_report(report)
+
+    def apply_bundled(self, save) -> savelib_mod.ApplyReport:
+        """Charge une sauvegarde de la bibliothèque et rend le compte rendu, sans rien
+        afficher. Séparé de la boîte de dialogue pour rester testable."""
+        root = self.save_root
+        report = savelib_mod.apply_bundled(
+            save, save_root=root, steam_id=None, ledger=self.ctx.ledger)
+        self.refresh()
+        return report
+
+    def _rollback_bundled(self) -> None:
+        report = savelib_mod.restore_rollback(
+            save_root=self.save_root, ledger=self.ctx.ledger)
+        self.refresh()
+        self._show_apply_report(report)
+
+    def _show_apply_report(self, report: savelib_mod.ApplyReport) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle("Chargement" if report.ok else "Chargement impossible")
+        box.setIcon(QMessageBox.Icon.Information if report.ok else QMessageBox.Icon.Warning)
+        box.setText(report.message)
+        if report.warnings:
+            box.setInformativeText("\n\n".join("!  " + w for w in report.warnings))
+        box.exec()
+
+    # --- éditeur de sauvegarde ----------------------------------------------------
+
+    def _render_editor(self) -> None:
+        """Donne à l'éditeur un fichier par défaut, sans le reconstruire.
+
+        L'éditeur garde SON fichier une fois qu'il en a un (choisi à la main ou ouvert
+        par défaut) : un rafraîchissement ne doit pas le renvoyer sans prévenir sur le
+        LastCheckpoint.sav pendant que l'utilisateur édite une autre sauvegarde. On ne
+        touche donc qu'au dossier par défaut et, si aucun fichier n'est encore ouvert, au
+        fichier de départ.
+        """
+        root = self.save_root
+        self.editor.default_dir = root if (root is not None and root.is_dir()) else None
+        if self.editor.path is None and root is not None and root.is_dir():
+            default = root / "LastCheckpoint.sav"
+            if default.is_file():
+                self.editor.set_path(default)
+
     def _render_slots(self) -> None:
         self._clear(self.slots_card)
         row = QHBoxLayout()
@@ -346,14 +1021,14 @@ class SavesPage(Page):
         title.setObjectName("SectionTitle")
         card.body.addWidget(title)
         text = QLabel(
-            "Aucune édition de sauvegarde n'est proposée — ni débloquer une zone, ni "
-            "ajouter des objets, ni changer un compteur. Uniquement la copie et la "
-            "restauration de fichiers entiers. Ce n'est pas une limite technique qu'on "
-            "lèvera plus tard : le format de ces sauvegardes contient un cadrage entre "
-            "objets qui n'est pas rétro-conçu, et toute écriture qui change une "
-            "longueur le décale. Le fichier reste chargeable en apparence et casse "
-            "plus tard, sans message. Une copie de fichier, elle, est exacte à l'octet "
-            "près.")
+            "L'éditeur ci-dessus ne propose QUE les modifications sûres : cases à cocher "
+            "et nombres à largeur fixe, dont l'aller-retour est exact à l'octet près. "
+            "Il ne touche jamais aux chaînes, tableaux ou maps : le format de ces "
+            "sauvegardes contient un cadrage entre objets qui n'est pas rétro-conçu, et "
+            "toute écriture qui change une longueur le décale — le fichier reste "
+            "chargeable en apparence et casse plus tard, sans message. Ces champs sont "
+            "donc lus mais jamais proposés à l'écriture. La copie de fichiers entiers "
+            "(instantanés, bibliothèque) reste, elle, sans le moindre risque.")
         text.setObjectName("Dim")
         text.setWordWrap(True)
         card.body.addWidget(text)
