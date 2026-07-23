@@ -4,3 +4,6 @@
 # Le reste en LF.
 *.py text eol=lf
 *.md text eol=lf
+
+# Le build UE4SS embarque est une install de reference : ne jamais convertir.
+fe_launcher/resources/ue4ss_bundle/** -text
