@@ -417,3 +417,14 @@ def test_bibliotheque_est_une_grille_responsive(saves_page: SavesPage, tmp_path:
     tall = flow.heightForWidth(300)     # étroit : une colonne, haut
     wide = flow.heightForWidth(1100)    # large : plusieurs colonnes, bas
     assert wide < tall, "la grille doit se replier : plus de largeur => moins de hauteur"
+
+    # Les boutons « Charger » doivent porter leur texte ET ne pas avoir été rendus vides
+    # par une feuille de style transparente qui cascade depuis un conteneur parent.
+    from PySide6.QtWidgets import QPushButton
+    loads = [b for b in saves_page.findChildren(QPushButton) if b.text() == "Charger"]
+    assert len(loads) == len(cards)
+    for b in loads:
+        assert b.isEnabled(), "une save complète avec dossier valide doit être chargeable"
+        # Un stylesheet posé sur ce bouton (ou hérité) ne doit pas vider son fond : on
+        # vérifie qu'aucune règle transparente ne s'y applique via `styleSheet()`.
+        assert "transparent" not in b.styleSheet().lower()

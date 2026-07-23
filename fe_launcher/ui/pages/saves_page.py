@@ -69,9 +69,11 @@ class _FlowContainer(QWidget):
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
-        # Transparent : sinon la règle QSS globale `QWidget` lui peint le fond de la
-        # FENÊTRE (très sombre) en un rectangle visible par-dessus la carte claire.
-        self.setStyleSheet("background:transparent;")
+        # Transparent, mais via un sélecteur d'ID : `setStyleSheet("background:...")` tout
+        # court CASCADE sur tous les enfants (il vidait le fond des boutons « Charger »,
+        # qui apparaissaient vides). `#FlowGrid { … }` ne matche QUE ce conteneur.
+        self.setObjectName("FlowGrid")
+        self.setStyleSheet("#FlowGrid { background: transparent; }")
 
     def hasHeightForWidth(self) -> bool:  # noqa: N802 — API Qt
         return True
@@ -918,7 +920,9 @@ class SavesPage(Page):
         if not save.complete:
             top.addWidget(Badge("!", "warn"), 0)
         top_holder = QWidget()
-        top_holder.setStyleSheet("background:transparent;")  # pas de boîte sombre sur la carte
+        # Sélecteur d'ID : transparence du seul bandeau, sans cascader sur ses enfants.
+        top_holder.setObjectName("SaveCardHead")
+        top_holder.setStyleSheet("#SaveCardHead { background: transparent; }")
         top_holder.setLayout(top)
         col.addWidget(top_holder)
 
