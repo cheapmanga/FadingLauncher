@@ -40,9 +40,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QSpinBox, QToolButton, QVBoxLayout,
-    QWidget,
+    QCheckBox, QDoubleSpinBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from ...core import savelib as savelib_mod
@@ -587,7 +587,9 @@ class SavesPage(Page):
         root = QVBoxLayout(self)
         root.setContentsMargins(METRICS.pad_lg, METRICS.pad_lg,
                                 METRICS.pad_lg, METRICS.pad_lg)
-        root.setSpacing(METRICS.pad)
+        # Plus d'air entre les cartes : la page enchaînait six blocs collés, ça se lisait
+        # comme un mur. On respire à `pad_lg` entre chaque.
+        root.setSpacing(METRICS.pad_lg)
 
         self.header = PageHeader(
             "Sauvegardes",
@@ -600,30 +602,32 @@ class SavesPage(Page):
         self.snapshot_btn.clicked.connect(self._snapshot)
         self.header.add_action(self.snapshot_btn)
 
+        # --- Ce qui compte au quotidien, visible d'emblée : où sont les saves, la
+        #     bibliothèque à charger, les instantanés pris. ---
         self.location_card = Card()
         root.addWidget(self.location_card)
-
-        self.cloud_card = Card()
-        root.addWidget(self.cloud_card)
 
         self.library_card = Card()
         root.addWidget(self.library_card)
 
-        # L'éditeur est construit UNE fois et jamais détruit par un rafraîchissement :
-        # il garde son fichier ouvert et l'état de ses cases pendant que d'autres cartes
-        # se reconstruisent autour de lui.
-        self.editor_card = Card()
-        editor_title = QLabel("Modifier une sauvegarde")
-        editor_title.setObjectName("SectionTitle")
-        self.editor_card.body.addWidget(editor_title)
-        self.editor = SaveEditor(self.ctx)
-        self.editor_card.body.addWidget(self.editor)
-        root.addWidget(self.editor_card)
-
         self.slots_card = Card()
         root.addWidget(self.slots_card)
 
-        root.addWidget(self._build_policy_card())
+        # --- Le secondaire, replié par défaut : l'éditeur (puissant mais encombrant) et
+        #     les mises en garde (Steam Cloud, limites de l'édition). On les ouvre à la
+        #     demande au lieu de les imposer en permanence. ---
+        # L'éditeur est construit UNE fois et jamais détruit par un rafraîchissement :
+        # il garde son fichier ouvert et l'état de ses cases pendant que d'autres cartes
+        # se reconstruisent autour de lui. Le replier ne le détruit pas — il reste vivant
+        # dans le conteneur masqué.
+        self.editor = SaveEditor(self.ctx)
+        editor_section = Collapsible("Modifier une sauvegarde (avancé)")
+        editor_section.body.addWidget(self.editor)
+        root.addWidget(editor_section)
+
+        self.cloud_card = Card()
+        root.addWidget(self.cloud_card)
+
         root.addStretch(1)
 
         self.refresh()
@@ -753,29 +757,43 @@ class SavesPage(Page):
 
     def _render_cloud(self) -> None:
         self._clear(self.cloud_card)
-        title = QLabel("Steam Cloud")
-        title.setObjectName("SectionTitle")
-        self.cloud_card.body.addWidget(title)
 
-        # Cet avertissement est permanent, pas conditionnel : le piège n'est pas un
-        # incident rare qu'on signalerait quand il se produit, c'est le fonctionnement
-        # normal de Steam pour ce jeu.
-        base = QLabel(
+        # Résumé sur une ligne, toujours visible ; le détail complet (et les limites de
+        # l'édition) se déplient à la demande, au lieu d'occuper deux gros pavés en
+        # permanence.
+        summary = QLabel(
+            "⚠  Steam Cloud peut écraser une restauration sans prévenir — quittez Steam "
+            "avant de restaurer.")
+        summary.setWordWrap(True)
+        summary.setStyleSheet(f"color:{PALETTE.warn}; font-weight:600;")
+        self.cloud_card.body.addWidget(summary)
+
+        details = Collapsible("Pourquoi, et ce que cette page ne fait pas")
+        cloud = QLabel(
             f"Ce jeu ne synchronise que {saves_mod.UFS_MAX_NUM_FILES} fichiers .sav, "
             "et il en a exactement trois : le quota est plein. Un .sav supplémentaire "
             "posé à la main dans ce dossier met la synchro dans un état non spécifié — "
             "Steam ne garantit pas lequel il conservera. Par ailleurs, le client "
             "recopie ce dossier à son démarrage ET à sa fermeture : une sauvegarde "
             "restaurée pendant que Steam tourne peut être remplacée quelques secondes "
-            "plus tard, sans message et sans erreur. Dans le doute, quittez "
-            "complètement Steam avant de restaurer.")
-        base.setWordWrap(True)
-        base.setStyleSheet(
-            f"color:{PALETTE.warn}; background:{PALETTE.warn_bg};"
-            f"border:1px solid {PALETTE.warn}44; border-radius:{METRICS.radius_sm}px;"
-            f"padding:{METRICS.pad_sm}px;")
-        self.cloud_card.body.addWidget(base)
+            "plus tard, sans message et sans erreur.")
+        cloud.setWordWrap(True)
+        cloud.setObjectName("Dim")
+        details.body.addWidget(cloud)
 
+        policy = QLabel(
+            "L'éditeur ne propose QUE les modifications sûres : cases à cocher et nombres "
+            "à largeur fixe, dont l'aller-retour est exact à l'octet près. Il ne touche "
+            "jamais aux chaînes, tableaux ou maps — leur cadrage n'est pas rétro-conçu, "
+            "et toute écriture qui change une longueur casse le fichier plus tard, sans "
+            "message. La copie de fichiers entiers (instantanés, bibliothèque) reste, "
+            "elle, sans le moindre risque.")
+        policy.setWordWrap(True)
+        policy.setObjectName("Dim")
+        details.body.addWidget(policy)
+        self.cloud_card.body.addWidget(details)
+
+        # Les vrais problèmes détectés (un .sav de trop) restent visibles, pas repliés.
         root = self.save_root
         if root is None or not root.is_dir():
             return
@@ -834,16 +852,22 @@ class SavesPage(Page):
             self.library_card.body.addWidget(empty)
             return
 
-        for i, save in enumerate(saves):
-            if i:
-                self.library_card.body.addWidget(separator())
-            self.library_card.body.addWidget(self._bundled_row(save, enabled=root is not None and root.is_dir()))
+        enabled = root is not None and root.is_dir()
+        for save in saves:
+            self.library_card.body.addWidget(self._bundled_row(save, enabled=enabled))
 
     def _bundled_row(self, save, *, enabled: bool) -> QWidget:
-        holder = QWidget()
+        # Une ligne = une carte légère (fond alterné + coins arrondis) plutôt qu'un bloc
+        # séparé par un trait. Les 15 saves se lisent alors comme une liste aérée, pas
+        # comme un registre.
+        holder = QFrame()
+        holder.setObjectName("SaveRow")
+        holder.setStyleSheet(
+            f"#SaveRow {{ background:{PALETTE.surface_alt}; "
+            f"border-radius:{METRICS.radius_sm}px; }}")
         col = QVBoxLayout(holder)
-        col.setContentsMargins(0, METRICS.pad_sm, 0, METRICS.pad_sm)
-        col.setSpacing(3)
+        col.setContentsMargins(METRICS.pad, METRICS.pad_sm, METRICS.pad_sm, METRICS.pad_sm)
+        col.setSpacing(2)
 
         top = QHBoxLayout()
         top.setSpacing(METRICS.pad_sm)
@@ -962,16 +986,18 @@ class SavesPage(Page):
             self.slots_card.body.addWidget(empty)
             return
 
-        for i, slot in enumerate(slots):
-            if i:
-                self.slots_card.body.addWidget(separator())
+        for slot in slots:
             self.slots_card.body.addWidget(self._slot_row(slot))
 
     def _slot_row(self, slot: saves_mod.SaveSlot) -> QWidget:
-        holder = QWidget()
+        holder = QFrame()
+        holder.setObjectName("SlotRow")
+        holder.setStyleSheet(
+            f"#SlotRow {{ background:{PALETTE.surface_alt}; "
+            f"border-radius:{METRICS.radius_sm}px; }}")
         col = QVBoxLayout(holder)
-        col.setContentsMargins(0, METRICS.pad_sm, 0, METRICS.pad_sm)
-        col.setSpacing(3)
+        col.setContentsMargins(METRICS.pad, METRICS.pad_sm, METRICS.pad_sm, METRICS.pad_sm)
+        col.setSpacing(2)
 
         top = QHBoxLayout()
         top.setSpacing(METRICS.pad_sm)
@@ -1014,25 +1040,6 @@ class SavesPage(Page):
             note.setWordWrap(True)
             col.addWidget(note)
         return holder
-
-    def _build_policy_card(self) -> Card:
-        card = Card()
-        title = QLabel("Ce que cette page ne fait pas")
-        title.setObjectName("SectionTitle")
-        card.body.addWidget(title)
-        text = QLabel(
-            "L'éditeur ci-dessus ne propose QUE les modifications sûres : cases à cocher "
-            "et nombres à largeur fixe, dont l'aller-retour est exact à l'octet près. "
-            "Il ne touche jamais aux chaînes, tableaux ou maps : le format de ces "
-            "sauvegardes contient un cadrage entre objets qui n'est pas rétro-conçu, et "
-            "toute écriture qui change une longueur le décale — le fichier reste "
-            "chargeable en apparence et casse plus tard, sans message. Ces champs sont "
-            "donc lus mais jamais proposés à l'écriture. La copie de fichiers entiers "
-            "(instantanés, bibliothèque) reste, elle, sans le moindre risque.")
-        text.setObjectName("Dim")
-        text.setWordWrap(True)
-        card.body.addWidget(text)
-        return card
 
     # --- actions ------------------------------------------------------------------
 
