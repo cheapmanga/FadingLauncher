@@ -70,6 +70,29 @@ def install_from_bundle(install: GameInstall, ledger: Ledger, report: SetupRepor
         return False
 
     win64 = install.engine_dir
+
+    # RÉINSTALLATION = vrai remplacement, pas un écrasement partiel. On SUPPRIME d'abord
+    # l'ancien UE4SS (le dossier `ue4ss/` complet + `dwmapi.dll`) puis on réécrit à neuf.
+    # Sinon les fichiers d'un ancien build qui n'existent pas dans le nouveau resteraient
+    # (orphelins) et pourraient entrer en conflit. Chaque suppression passe par le journal
+    # (sauvegardée, donc annulable). Les mods sont ensuite regérés par la case dédiée.
+    if replace:
+        removed = 0
+        for old in (win64 / "ue4ss", win64 / "dwmapi.dll"):
+            if old.is_dir():
+                for f in sorted(old.rglob("*"), reverse=True):
+                    if f.is_file():
+                        ledger.delete_file(f, label=f"ancien UE4SS : {f.name}",
+                                           group=LEDGER_GROUP)
+                        removed += 1
+            elif old.is_file():
+                ledger.delete_file(old, label=f"ancien UE4SS : {old.name}",
+                                   group=LEDGER_GROUP)
+                removed += 1
+        if removed:
+            report.add("Ancien UE4SS retiré", True,
+                       f"{removed} fichier(s) supprimé(s) avant réécriture propre.")
+
     try:
         # 1. le proxy à la racine de Win64.
         ledger.create_file(win64 / "dwmapi.dll", (src / "dwmapi.dll").read_bytes(),

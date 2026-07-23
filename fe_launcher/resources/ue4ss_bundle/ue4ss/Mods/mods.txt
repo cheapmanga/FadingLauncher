@@ -9,7 +9,6 @@ LineTraceMod : 1
 BPML_GenericFunctions : 1
 BPModLoaderMod : 1
 jsbLuaProfilerMod : 0
-FadingEchoTrainer : 1
 
 
 
