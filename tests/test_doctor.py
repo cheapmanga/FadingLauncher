@@ -270,7 +270,10 @@ def test_conflit_de_touche_et_de_commande(tmp_path):
     key = by_code(result, "mods.conflict.keybind.F7")
     cmd = by_code(result, "mods.conflict.command.demo")
 
-    assert key.level is Level.WARN and cmd.level is Level.WARN
+    # Une touche partagée reste un AVERTISSEMENT (déclenche plusieurs actions), mais
+    # une COMMANDE console partagée fait crasher le jeu sur ce moteur : c'est une ERREUR.
+    assert key.level is Level.WARN and cmd.level is Level.ERROR
+    assert "CRASH" in cmd.why or "crash" in cmd.why
     assert "toutes les actions" in key.why or "tous les callbacks" in key.why
     assert "campagne de mesure" in key.why
     assert len(key.options) == 2

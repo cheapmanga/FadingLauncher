@@ -554,21 +554,23 @@ def _conflict_diagnosis(c: Conflict, by_name: dict[str, Mod]) -> Diagnosis:
         title = f"Touche {c.resource} partagée par {len(c.mods)} mods actifs"
     else:
         why = (
-            f"La commande console `{c.resource}` est enregistrée par {len(c.mods)} mods. "
-            "UE4SS ne garde qu'un seul gestionnaire par nom de commande ; lequel gagne "
-            "dépend de l'ordre de chargement, qui n'est pas garanti d'un lancement à "
-            "l'autre. La commande fait donc parfois autre chose que ce qu'on attend."
+            f"La commande console `{c.resource}` est enregistrée par {len(c.mods)} mods "
+            "actifs à la fois. Sur ce jeu, ce n'est pas anodin : taper la commande fait "
+            "CRASHER le jeu (EXCEPTION_ACCESS_VIOLATION dans UE4SS.dll). Les deux mods "
+            "s'inscrivent sur le même nom, la table des gestionnaires d'UE4SS se retrouve "
+            "dans un état incohérent, et le dispatch déréférence un pointeur nul. "
+            "Il faut n'en garder qu'un seul actif — les deux restent installés."
         )
-        title = f"Commande console `{c.resource}` enregistrée par {len(c.mods)} mods actifs"
+        title = f"Commande `{c.resource}` partagée par {len(c.mods)} mods actifs (fait crasher)"
 
     return Diagnosis(
         code=f"mods.conflict.{c.kind}.{c.resource}",
-        level=Level.WARN,
+        level=Level.WARN if c.kind == "keybind" else Level.ERROR,
         title=title,
         detail=c.message,
         why=why,
         options=options,
-        doc="Les touches sont déclarées en tête de Scripts/main.lua de chaque mod.",
+        doc="Les touches et commandes sont déclarées en tête de Scripts/main.lua.",
     )
 
 

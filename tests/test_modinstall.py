@@ -53,3 +53,39 @@ def test_install_ne_reinstalle_pas_un_mod_present(layout, tmp_path):
     modinstall.install(layout, "ue4ss-FESkins", led)
     r = modinstall.install(layout, "ue4ss-FESkins", led)  # 2e fois
     assert r.ok and "ue4ss-FESkins" in r.skipped
+
+
+# --- Conflit de commande console : jamais deux fournisseurs actifs ------------------
+#
+# Régression vécue en jeu : FECoreGiver et FEUnlocker-Plus enregistrent tous deux la
+# commande `core`. Installés+activés ensemble, taper `core water` crashait le jeu
+# (EXCEPTION_ACCESS_VIOLATION dans UE4SS.dll). L'installation groupée doit désormais
+# n'en activer qu'un et poser l'autre désactivé.
+
+def test_install_all_n_active_pas_deux_fournisseurs_de_core(layout, tmp_path):
+    led = Ledger(tmp_path / "led")
+    report = modinstall.install_all(layout, led)
+    loaded = mods.load(layout)
+
+    actifs_core = [m.name for m in loaded
+                   if m.state is mods.ModState.ENABLED and "core" in m.commands]
+    assert len(actifs_core) == 1, f"un seul fournisseur de 'core' actif, vu : {actifs_core}"
+
+    # aucun conflit de commande résiduel, quelle que soit la commande
+    assert not [c for c in mods.conflicts(loaded) if c.kind == "command"]
+
+    # le mod complet (core + unlock) est gardé, le sous-ensemble est posé mais désactivé
+    assert actifs_core == ["ue4ss-FEUnlocker-Plus"]
+    cg = next(m for m in loaded if m.name == "ue4ss-FECoreGiver")
+    assert cg.state is mods.ModState.DISABLED
+    assert (cg.path / "Scripts" / "main.lua").is_file()  # posé, pas incomplet
+    assert "ue4ss-FECoreGiver" in report.deactivated
+
+
+def test_activate_false_ne_copie_pas_le_marqueur_du_bundle(layout, tmp_path):
+    """`activate=False` doit vraiment laisser le mod désactivé, marqueur du bundle inclus."""
+    led = Ledger(tmp_path / "led")
+    modinstall.install(layout, "ue4ss-FECoreGiver", led, activate=False)
+    assert not (layout.mods_dir / "ue4ss-FECoreGiver" / "enabled.txt").is_file()
+    loaded = {m.name: m for m in mods.load(layout)}
+    assert loaded["ue4ss-FECoreGiver"].state is mods.ModState.DISABLED
